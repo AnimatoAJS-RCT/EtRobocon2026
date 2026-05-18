@@ -18,6 +18,7 @@
 #include "Calibrator.h"
 #include "Util.h"
 #include "Calibrator.h"
+#include "Log.h"
 
 #include "Light.h"
 #include "Button.h"
@@ -57,9 +58,22 @@ static Starter* gStarter;
 static DistanceTerminator* gDistanceTerminator;
 static ColorTerminator* gColorTerminator;
 static Calibrator* gCalibrator;
+static bool gCalibratorWakeSent;
 
 std::vector<Tracer*> tracerList;
 int tracerListSize;
+
+static const char* tracerTypeName(const Tracer* tracer)
+{
+    if(dynamic_cast<const ScenarioTracer*>(tracer) != nullptr) {
+        return "ScenarioTracer";
+    }
+    if(dynamic_cast<const LineTracer*>(tracer) != nullptr) {
+        return "LineTracer";
+    }
+
+    return "UnknownTracer";
+}
 
 void generateTracerList()
 {
@@ -70,7 +84,7 @@ void generateTracerList()
     size_t result_size;
 
 #ifndef MAKE_RASPIKE
-    printf("sim\n");
+    LOGI("sim\n");
     // シミュレーター環境でファイルを読み込めないため固定文字列で設定値を読み込む
     const std::string lines[] = { "ScenarioTracer 100 40 40",
                                   "LineTracer 6000 20 50 50 LEFT_EDGE 1.3 0 0.013 BLUE",
@@ -89,7 +103,7 @@ void generateTracerList()
     int idx = 0;
     // strcpy((char*)spl, lines[idx]);
     while(lines[idx] != "#end") {
-        printf("readini: %s\n", lines[idx].c_str());
+        LOGD("readini: %s\n", lines[idx].c_str());
         if(lines[idx][0] == '#') {
             idx++;
             continue;
@@ -97,13 +111,13 @@ void generateTracerList()
 
         spl = split(lines[idx], " ");
 #else
-    printf("notsim\n");
+    LOGI("notsim\n");
     char iniPath[512];
     getcwd(iniPath, 512);  // カレントディレクトリ取得
     // 常にright.iniを読み込み、Lコース選択時にパラメータを反転させる
     strcat(iniPath, "/tracer_2025_right.ini");  // カレントディレクトリ配下のiniを指定
 
-    printf("tracer.ini読み取り:%s\n", iniPath);
+    LOGI("tracer.ini読み取り:%s\n", iniPath);
     FILE* file;
     file = fopen(iniPath, "r");  // ファイル読み込み
     char line[512];
@@ -123,9 +137,9 @@ void generateTracerList()
 #endif
         result_size = spl.size();
         for(size_t i = 0; i < result_size; ++i) {
-            printf("%lu: %s\n", (unsigned long)i, spl[i].c_str());
+            LOGD("%lu: %s\n", (unsigned long)i, spl[i].c_str());
         }
-        printf("\n");
+        LOGD("\n");
 
         if(spl[0] == "ScenarioTracer") {
             double targetDistance;
@@ -185,9 +199,9 @@ void generateTracerList()
             p = atof(spl[6].c_str());
             i = atof(spl[7].c_str());
             d = atof(spl[8].c_str());
-            printf("LineTracer(%lf, %d, %d, %d, %s, PidGain(%lf, %lf, %lf)): push\n",
-                   targetDistance, targetBrightness, pwm, maxPwm,
-                   isLeftEdge ? "LEFT_EDGE" : "RIGHT_EDGE", p, i, d);
+            LOGI("LineTracer(%lf, %d, %d, %d, %s, PidGain(%lf, %lf, %lf)): push\n",
+                 targetDistance, targetBrightness, pwm, maxPwm,
+                 isLeftEdge ? "LEFT_EDGE" : "RIGHT_EDGE", p, i, d);
             pidGain = new PidGain(p, i, d);
             gLineTracer
                 = new LineTracer(gLineMonitor, gWalker, targetBrightness, pwm, isLeftEdge, pidGain);
@@ -205,7 +219,7 @@ void generateTracerList()
                 } else if(spl[9] == "YELLOW") {
                     stopColor = YELLOW;
                 }
-                printf("stopColor: %s\n", colorToString(stopColor));
+                LOGI("stopColor: %s\n", colorToString(stopColor));
                 gColorTerminator = new ColorTerminator(&gColorSensor, stopColor);
                 gLineTracer->addTerminator(gColorTerminator);
             }
@@ -348,35 +362,42 @@ static void user_system_destroy()
  */
 void main_task(intptr_t unused)
 {
-    // 標準出力をバッファリングしないように設定
-    setbuf(stdout, NULL);
+    ER ercd;
+    user_system_create();  // センサやモータの初期化処理
+    LOGI("[MAIN] user_system_create done\n");
+    gCalibratorWakeSent = false;
 
-    user_system_create();  // iniファイル読み込みを含むシステム生成
-    
-    int black = gCalibrator->getBlack();
-    int white = gCalibrator->getWhite();
+    // 周期ハンドラ開始
+    ercd = sta_cyc(CYC_CALIBRATOR);
+    LOGI("[MAIN] sta_cyc(CYC_CALIBRATOR)=%d\n", ercd);
 
-    // 各LineTracerの目標輝度をキャリブレーション結果に基づいて補正する
+    LOGI("[MAIN] waiting calibration completion...\n");
+    ercd = slp_tsk();  // キャリブレーション完了まで待つ
+    LOGI("[MAIN] woke from calibration wait, slp_tsk()=%d\n", ercd);
+
+    // 周期ハンドラ停止
+    ercd = stp_cyc(CYC_CALIBRATOR);
+    LOGI("[MAIN] stp_cyc(CYC_CALIBRATOR)=%d\n", ercd);
+
+    // キャリブレーション結果をLineTracerに設定
     for(auto tracer : tracerList) {
         LineTracer* lineTracer = dynamic_cast<LineTracer*>(tracer);
         if(lineTracer != nullptr) {
-            // iniファイルで設定された目標輝度(0-100)を、
-            // 実際の白黒値の範囲にスケーリングする
-            int normalizedTarget = lineTracer->getNormalizedTargetBrightness();
-            int scaledTarget = black + (white - black) * normalizedTarget / 100;
-            lineTracer->setTargetBrightness(scaledTarget);
-            printf("LineTracer target brightness updated: normalized=%d -> scaled=%d (black:%d, white:%d)\n",
-                   normalizedTarget, scaledTarget, black, white);
+            lineTracer->setTargetBrightness(gCalibrator->getTarget());
         }
     }
 
     // 周期ハンドラ開始
-    sta_cyc(CYC_TRACER);
+    ercd = sta_cyc(CYC_TRACER);
+    LOGI("[MAIN] sta_cyc(CYC_TRACER)=%d\n", ercd);
 
-    slp_tsk();  // バックボタンが押されるまで待つ
+    LOGI("[MAIN] waiting tracer completion or left button...\n");
+    ercd = slp_tsk();  // トレース完了 or レフトボタン押下まで待つ
+    LOGI("[MAIN] woke from tracer wait, slp_tsk()=%d\n", ercd);
 
     // 周期ハンドラ停止
-    stp_cyc(CYC_TRACER);
+    ercd = stp_cyc(CYC_TRACER);
+    LOGI("[MAIN] stp_cyc(CYC_TRACER)=%d\n", ercd);
 
     user_system_destroy();  // 終了処理
 
@@ -386,9 +407,23 @@ void main_task(intptr_t unused)
 /**
  * キャリブレーション
  */
-void calibrate()
+void calibrator_task(intptr_t exinf)
 {
+    ER ercd;
+    (void)exinf;
+    LOGD("[CAL_TASK] start\n");
     gCalibrator->run();
+    LOGI("[CAL_TASK] finished calibrator run\n");
+
+    if(!gCalibratorWakeSent && gCalibrator->isFinished()) {
+        gCalibratorWakeSent = true;
+        ercd = wup_tsk(MAIN_TASK);
+        LOGI("[CAL_TASK] wup_tsk(MAIN_TASK)=%d\n", ercd);
+    } else {
+        LOGD("[CAL_TASK] skip wake (already sent or not finished)\n");
+    }
+
+    ext_tsk();
 }
 
 /**
@@ -396,22 +431,44 @@ void calibrate()
  */
 void tracer_task(intptr_t exinf)
 {
+    static int traceLogCounter = 0;
+    static int lastLoggedIndex = -1;
+    ER ercd;
     Button button;
 
     if(button.isLeftPressed()) {
-        wup_tsk(MAIN_TASK);  // レフトボタン押下
+        ercd = wup_tsk(MAIN_TASK);  // レフトボタン押下
+        LOGI("[TRACER_TASK] left button: wup_tsk(MAIN_TASK)=%d\n", ercd);
     } else {
         if(!tracerList.empty() && tracerList.front() != nullptr
            && tracerList.front()->isTerminated()) {
-            printf("remove\n");
+            LOGI("remove\n");
             Tracer* tracer = tracerList.front();
             tracerList.erase(tracerList.begin());
             delete tracer;
+
+            if(!tracerList.empty() && tracerList.front() != nullptr) {
+                int nextIndex = tracerListSize - tracerList.size() + 1;
+                LOGI("[TRACER_TASK] next tracer: %d/%d %s\n", nextIndex, tracerListSize,
+                     tracerTypeName(tracerList.front()));
+            } else {
+                LOGI("[TRACER_TASK] no next tracer\n");
+            }
+        }
+
+        if(tracerList.empty()) {
+            ercd = wup_tsk(MAIN_TASK);
+            LOGI("[TRACER_TASK] tracerList empty: wup_tsk(MAIN_TASK)=%d\n", ercd);
+            ext_tsk();
         }
 
         if(!tracerList.empty() && tracerList.front() != nullptr) {
-            printf("tracer_task: tracerList: %d/%d\n", (tracerListSize - tracerList.size() + 1),
-                   tracerListSize);
+            int currentIndex = tracerListSize - tracerList.size() + 1;
+            if(lastLoggedIndex != currentIndex || (traceLogCounter % 100) == 0) {
+                LOGD("[TRACER_TASK] tracerList: %d/%d\n", currentIndex, tracerListSize);
+                lastLoggedIndex = currentIndex;
+            }
+            traceLogCounter++;
             tracerList.front()->run();
         }
     }

@@ -1,42 +1,44 @@
 #include "Calibrator.h"
 #include "Util.h"
-#include "app.h"  // IS_LEFT_COURSE を参照するため
-#include <stdio.h>  // for sprintf
-#include <thread>
-#include <chrono>
+#include "Log.h"
+
+#include "kernel.h"
 
 Calibrator::Calibrator(const spikeapi::ColorSensor& colorSensor,
-                       const spikeapi::ForceSensor& forceSensor)
-  : mColorSensor(colorSensor), mForceSensor(forceSensor)
+                                             const spikeapi::ForceSensor& forceSensor)
+    : mColorSensor(colorSensor), mForceSensor(forceSensor)
 {
 }
 
 void Calibrator::run()
 {
-    execUndefined();
-
-    // 1. 開始待ち
-    execWaitingForStart();
-
-    // 2. コース設定
-    execSettingCourse();
-
-    // 3. 黒測定
-    execCalibratingBlack();
-
-    // 4. 白測定
-    execCalibratingWhite();
-
-    // 5. 終了
-    execTerminated();
-}
-
-void Calibrator::execTerminated()
-{
-    printf("Calibration Finished.\n");
-    printf("Target: %d\n", getTarget());
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));  // 2s wait to show result
-    mState = TERMINATED;
+    while(1) {
+        switch(mState) {
+            case UNDEFINED:
+                execUndefined();
+                break;
+            case WAITING_FOR_START:
+                execWaitingForStart();
+                break;
+            case CALIBRATING_BLACK:
+                execCalibratingBlack();
+                break;
+            case WAITING_FOR_WHITE:
+                execWaitingForWhite();
+                break;
+            case CALIBRATING_WHITE:
+                execCalibratingWhite();
+                break;
+            case WAITING_FOR_FINISH:
+                execWaitingForFinish();
+                break;
+            case TERMINATED:
+                // Do nothing
+                return;
+            default:
+                break;
+        }
+    }
 }
 
 int Calibrator::getBlack()
@@ -70,82 +72,79 @@ void Calibrator::execUndefined()
 
 void Calibrator::execWaitingForStart()
 {
-    printf("Calibrate: Push to start\n");
-    // ボタンが押されるまで待つ
+    LOGI("Calibrate: Push to start\n");
     while(!mForceSensor.isTouched()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        mState = CALIBRATING_BLACK;
+        tslp_tsk(500);  // 500ms wait
     }
-    // ボタンが離されるまで待つ（チャタリング防止）
-    while(mForceSensor.isTouched()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    mState = SETTING_COURSE;
-}
-
-void Calibrator::execSettingCourse()
-{
-    printf("Set Course: Push to toggle\n");
-
-    // 3秒間入力がなければ次のステップへ
-    const int timeout_ms = 3000;
-    auto last_input_time = std::chrono::steady_clock::now();
-
-    while (true) {
-        // 現在のコース設定を表示
-        printf("Course: %s (Confirm in %lds) \n",
-               IS_LEFT_COURSE ? "LEFT " : "RIGHT",
-               (long)(timeout_ms / 1000
-                      - std::chrono::duration_cast<std::chrono::seconds>(
-                            std::chrono::steady_clock::now() - last_input_time)
-                            .count()));
-
-        if (mForceSensor.isTouched()) {
-            IS_LEFT_COURSE = !IS_LEFT_COURSE;  // コースをトグル
-            last_input_time = std::chrono::steady_clock::now(); // タイマーリセット
-            // ボタンが離されるまで待つ
-            while(mForceSensor.isTouched()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-        }
-
-        // タイムアウト判定
-        if (std::chrono::steady_clock::now() - last_input_time > std::chrono::milliseconds(timeout_ms)) {
-            printf("\nCourse set to %s.\n", IS_LEFT_COURSE ? "LEFT" : "RIGHT");
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    mState = CALIBRATING_BLACK;
 }
 
 void Calibrator::execCalibratingBlack()
 {
-    printf("Set to Black & Push\n");
-    // ボタンが押されるまで待つ
-    while(!mForceSensor.isTouched()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    LOGI("Calibrating black...\n");
     mBlack = mColorSensor.getReflection();
-    printf("Black: %d\n", mBlack);
-    // ボタンが離されるまで待つ
-    while(mForceSensor.isTouched()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    char msg[32];
+    sprintf(msg, "Black: %d", mBlack);
+    LOGI("%s\n", msg);
+    tslp_tsk(1000);  // 1s wait
+    mState = WAITING_FOR_WHITE;
+}
+
+void Calibrator::execWaitingForWhite()
+{
+    static int waitLoop = 0;
+    if(waitLoop % 20 == 0) {
+        LOGD("[CAL] WAITING_FOR_WHITE: touched=%d force=%.2f\n",
+             mForceSensor.isTouched() ? 1 : 0, mForceSensor.getForce());
+        LOGI("Set white\n");
+        LOGI("Push to start\n");
     }
-    mState = CALIBRATING_WHITE;
+
+    if(mForceSensor.isTouched()) {
+        LOGI("[CAL] WAITING_FOR_WHITE -> CALIBRATING_WHITE\n");
+        mState = CALIBRATING_WHITE;
+        tslp_tsk(500);  // 500ms wait
+        waitLoop = 0;
+        return;
+    }
+
+    waitLoop++;
+    tslp_tsk(50);
 }
 
 void Calibrator::execCalibratingWhite()
 {
-    printf("Set to White & Push\n");
-    // ボタンが押されるまで待つ
-    while(!mForceSensor.isTouched()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    LOGI("Calibrating white...\n");
     mWhite = mColorSensor.getReflection();
-    printf("White: %d\n", mWhite);
-    // ボタンが離されるまで待つ
-    while(mForceSensor.isTouched()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    char msg[32];
+    sprintf(msg, "White: %d", mWhite);
+    LOGI("%s\n", msg);
+    tslp_tsk(1000);  // 1s wait
+    mState = WAITING_FOR_FINISH;
+}
+
+void Calibrator::execWaitingForFinish()
+{
+    static int finishLoop = 0;
+    if(finishLoop == 0) {
+        LOGI("Finished.\n");
+        char msg[32];
+        sprintf(msg, "Target: %d", getTarget());
+        LOGI("%s\n", msg);
     }
-    mState = TERMINATED;
+
+    if(finishLoop % 20 == 0) {
+        LOGD("[CAL] WAITING_FOR_FINISH: touched=%d force=%.2f\n",
+             mForceSensor.isTouched() ? 1 : 0, mForceSensor.getForce());
+    }
+
+    if(mForceSensor.isTouched()) {
+        LOGI("[CAL] WAITING_FOR_FINISH -> TERMINATED\n");
+        mState = TERMINATED;
+        finishLoop = 0;
+        return;
+    }
+
+    finishLoop++;
+    tslp_tsk(50);
 }
