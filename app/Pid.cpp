@@ -1,4 +1,5 @@
 #include "Pid.h"
+#include "Log.h"
 #include <cstdio>
 #include <numeric>
 #include <unistd.h>
@@ -83,7 +84,8 @@ double Pid::calculatePid(double diff, double delta)
   double d = gain->kd * difference;
 
   // デバッグ用
-  printf("Pid::calculatePid(): %lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", diff, currentDeviation, integral, difference, p, i, d, (p + i + d));
+  LOGD_EVERY(200, "[PID]\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", diff,
+             currentDeviation, integral, difference, p, i, d, (p + i + d));
   // printf("CV: %lf, PID: %lf\n", currentValue, (p + i + d));
   //  FIXME:ファイル出力すると書き込みに時間がかかりすぎて走行結果に大きく影響する（書き込みの間、設定したPWMで車輪が動き続けるため）
   // FILE *file;//ファイルポインタを宣言

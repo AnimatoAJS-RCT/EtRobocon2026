@@ -28,6 +28,9 @@ class ColorTerminator : public Terminator {
    private:
     const spikeapi::ColorSensor* mColorSensor;
     const eColor mTermColor;
+    int mLogCounter;
+    bool mHasLastLoggedColor;
+    eColor mLastLoggedColor;
 };
 
 #endif  // ETTR_UNIT_ColorTerminator_H_

@@ -10,8 +10,7 @@
 #include "LineMonitor.h"
 
 #include "ColorSensor.h"
-
-#include <stdio.h>
+#include "Log.h"
 
 // 定数宣言
 const int8_t LineMonitor::INITIAL_THRESHOLD_BLACK = 5;  // 黒色の光センサ値
@@ -40,7 +39,7 @@ int LineMonitor::calDiffReflection() const
 
     spikeapi::ColorSensor::HSV hsv;
     mColorSensor.getHSV(hsv);
-    //printf("LineMonitor::calDiffReflection(): %d\t%u\t%u\t%u\n", diff, hsv.h, hsv.s, hsv.v);
+    LOGD_EVERY(100, "[LINE_MON] diff=%d\th=%u\ts=%u\tv=%u\n", diff, hsv.h, hsv.s, hsv.v);
 
     return diff;
 }
