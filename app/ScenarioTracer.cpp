@@ -1,5 +1,5 @@
 #include "ScenarioTracer.h"
-#include <stdio.h>
+#include "Log.h"
 #include <algorithm>  // for std::max, std::min
 
 // 回転数差を補正するためのPゲイン
@@ -8,30 +8,44 @@ const double ScenarioTracer::Kp = 0.05;
 const double ScenarioTracer::PWM_CORRECTION_LIMIT_RATIO = 0.2;
 
 ScenarioTracer::ScenarioTracer(Walker* walker, int leftPwm, int rightPwm)
-  : mWalker(walker), mLeftPwm(leftPwm), mRightPwm(rightPwm), mIsInitialized(false)
+    : mWalker(walker),
+        mLeftPwm(leftPwm),
+        mRightPwm(rightPwm),
+        mIsInitialized(false),
+        mLastLoggedState(-1)
 {
     mState = UNDEFINED;
 }
 
 void ScenarioTracer::run()
 {
-    //printf("ScenarioTracer.run: mState = %d\n", mState);
+    if(mLastLoggedState != mState) {
+        LOGD("[SCENARIO] state %d -> %d\n", mLastLoggedState, mState);
+        mLastLoggedState = mState;
+    }
+
+
     switch(mState) {
         case UNDEFINED:
             if(!mIsInitialized) {
-                mWalker->init();
                 mIsInitialized = true;
             }
             mState = WAITING_FOR_START;
             break;
         case WAITING_FOR_START:
             if(mStarterList.empty()) {
+                for(auto terminator : mTerminatorList) {
+                    terminator->init();
+                }
                 mWalker->setPwm(mLeftPwm, mRightPwm);
                 mState = WALKING;
                 return;
             }
             for(auto starter : mStarterList) {
                 if(starter->isPushed()) {
+                    for(auto terminator : mTerminatorList) {
+                        terminator->init();
+                    }
                     mWalker->setPwm(mLeftPwm, mRightPwm);
                     mState = WALKING;
                     return;
@@ -104,7 +118,7 @@ void ScenarioTracer::execWalking()
             mState = TERMINATED;
             int l = mWalker->getLeftCount();
             int r = mWalker->getRightCount();
-            printf("Stop: LC=%d, RC=%d\n", l, r);
+            LOGI("Stop: LC=%d, RC=%d\n", l, r);
             return;
         }
     }

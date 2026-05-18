@@ -7,8 +7,7 @@
  *****************************************************************************/
 
 #include "DistanceTerminator.h"
-#include <stdio.h>
-#include <cmath>
+#include "Log.h"
 
 const double DistanceTerminator::TIRE_DIAMETER = 5.5;
 const double DistanceTerminator::PI = 3.1415926535;
@@ -19,20 +18,35 @@ const double DistanceTerminator::PI = 3.1415926535;
  * @param targetDistance 目標距離 (mm)
  */
 DistanceTerminator::DistanceTerminator(Walker* walker, double targetDistance)
-  : mWalker(walker), mTargetDistance(targetDistance), mInitialDistance(0.0)
+    : mWalker(walker), mTargetDistance(targetDistance), mInitialDistance(0.0), mCheckCount(0)
 {
 }
 
 void DistanceTerminator::init()
 {
     mInitialDistance = calcCurrentDistance();
+        mCheckCount = 0;
+        LOGI("[DIST_TERM] init: initial=%f target=%f\n", mInitialDistance, mTargetDistance);
 }
 
 bool DistanceTerminator::isToBeTerminate()
 {
     double currentDistance = calcCurrentDistance() - mInitialDistance;
-    printf("DistanceTerminator::isToBeTerminate(): current: %f, target: %f\n", currentDistance, mTargetDistance);
-    return std::abs(currentDistance) >= mTargetDistance;
+    bool isTerminate = currentDistance >= mTargetDistance;
+
+    if(isTerminate) {
+        LOGI("[DIST_TERM] current=%f target=%f match=1\n", currentDistance, mTargetDistance);
+    } else if(mCheckCount < 5) {
+        LOGD("[DIST_TERM] first-check[%d]: current=%f target=%f match=0\n", mCheckCount,
+             currentDistance, mTargetDistance);
+    } else {
+        LOGD_EVERY(50, "[DIST_TERM] current=%f target=%f match=0\n", currentDistance,
+                   mTargetDistance);
+    }
+
+    mCheckCount++;
+
+    return isTerminate;
 }
 
 

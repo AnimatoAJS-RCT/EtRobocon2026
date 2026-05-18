@@ -27,9 +27,9 @@ public:
      * @param walker Walker
      * @param targetBrightness 目標輝度
      * @param pwm PWM値
-     * @param _isLeftEdge エッジの左右どちらを走るか(true:左エッジ, false:右エッジ)
+      * @param _isLeftEdge エッジの左右どちらを走るか(true:左エッジ, false:右エッジ)
      * @param _gain PIDゲイン
-     * @param _stopColor 停止条件の色 //TODO:未実装
+      * @param _stopColor 停止条件の色 //TODO:未実装
      */
     LineTracer(LineMonitor *lineMonitor,
                Walker *walker,

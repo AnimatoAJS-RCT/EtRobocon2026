@@ -10,3 +10,5 @@
 #include "Terminator.h"
 
 Terminator::Terminator(){};
+
+void Terminator::init() {}

@@ -83,7 +83,6 @@ float LineTracer::calcPropValue(int diffBrightness)
 void LineTracer::execUndefined()
 {
     if(mIsInitialized == false) {
-        mWalker->init();
         mIsInitialized = true;
     }
     mState = WAITING_FOR_START;
@@ -97,6 +96,9 @@ void LineTracer::execWaitingForStart()
     // 開始条件を満たしているか確認する
     if(mStarterList.empty()) {
         // 開始条件を満たした場合の処理
+        for(auto terminator : mTerminatorList) {
+            terminator->init();
+        }
         mLineMonitor->setThreshold(mTargetBrightness);
         mState = WALKING;
         return;
@@ -104,6 +106,9 @@ void LineTracer::execWaitingForStart()
     for(auto starter : mStarterList) {
         if(starter->isPushed()) {
             // 開始条件を満たした場合の処理
+            for(auto terminator : mTerminatorList) {
+                terminator->init();
+            }
             mLineMonitor->setThreshold(mTargetBrightness);
             mState = WALKING;
             return;

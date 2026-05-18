@@ -22,7 +22,7 @@ public:
     DistanceTerminator(Walker* walker, double targetDistance);
 
     bool isToBeTerminate();
-    void init();
+    void init() override;
 
 private:
     double calcCurrentDistance();
@@ -30,6 +30,7 @@ private:
     Walker* mWalker;
     double mTargetDistance;
     double mInitialDistance;
+    int mCheckCount;
     static const double TIRE_DIAMETER; // タイヤの直径 (mm)
     static const double PI;
 };

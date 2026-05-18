@@ -13,12 +13,14 @@
 class Terminator {
    public:
     /**
-     * ƒRƒ“ƒXƒgƒ‰ƒNƒ^
+     * ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿
      */
     Terminator();
 
+    virtual void init();
+
     /**
-     * @brief ‘–sI—¹‚·‚é‚×‚«‚©”»’è‚·‚é’ŠÛƒƒ\ƒbƒh
+     * @brief å®Ÿè¡Œã‚’çµ‚äº†ã™ã¹ãã‹åˆ¤å®šã™ã‚‹æŠ½è±¡ãƒ¡ã‚½ãƒƒãƒ‰
      */
     virtual bool isToBeTerminate() = 0;
 };
