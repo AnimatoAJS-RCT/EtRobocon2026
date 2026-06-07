@@ -23,7 +23,7 @@ chmod +x .githooks/pre-push
 フックは `etrobo` ルートから次のビルドを実行します。
 
 ```bash
-make app=EtRobocon2026 sim
+./make app=EtRobocon2026 sim
 ```
 
 スクリプトはリポジトリの位置から上位ディレクトリをたどり、`etrobo` ルートを自動で見つけます。

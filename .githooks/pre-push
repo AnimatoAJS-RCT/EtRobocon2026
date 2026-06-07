@@ -22,5 +22,5 @@ fi
 printf 'pre-push: building %s in %s\n' "$app_name" "$etrobo_root"
 
 pushd "$etrobo_root" >/dev/null
-make "app=$app_name" sim
+./make "app=$app_name" sim
 popd >/dev/null
