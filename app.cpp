@@ -77,8 +77,6 @@ static const char* tracerTypeName(const Tracer* tracer)
 void generateTracerList()
 {
     // iniファイル読み込み
-    int pwm, maxPwm;
-    double p, i, d;
     std::vector<std::string> spl;
     size_t result_size;
 
@@ -125,7 +123,7 @@ void generateTracerList()
     fgets(line, 512, file);
     line[strlen(line) - 1] = '\0';  // 改行まで読み込んでいるので末尾を削除（終端文字に変更）
     while(strcmp(line, "#end") != 0) {
-        // printf("readini: a%sa, %d\n", line, strcmp(line, "#end"));
+        // LOGD("readini: a%sa, %d\n", line, strcmp(line, "#end"));
         if(line[0] == '#') {
             fgets(line, 512, file);
             line[strlen(line) - 1] = '\0';
@@ -160,7 +158,8 @@ void generateTracerList()
             gScenarioTracer->addTerminator(gDistanceTerminator);
 
             if(result_size >= 5) {
-                eColor stopColor;
+                eColor stopColor = BLACK;
+                bool hasStopColor = true;
                 if(spl[4] == "BLACK") {
                     stopColor = BLACK;
                 } else if(spl[4] == "BLUE") {
@@ -171,9 +170,15 @@ void generateTracerList()
                     stopColor = GREEN;
                 } else if(spl[4] == "YELLOW") {
                     stopColor = YELLOW;
+                } else {
+                    hasStopColor = false;
+                    LOGI("Unknown stopColor: %s\n", spl[4].c_str());
                 }
-                gColorTerminator = new ColorTerminator(&gColorSensor, stopColor);
-                gScenarioTracer->addTerminator(gColorTerminator);
+
+                if(hasStopColor) {
+                    gColorTerminator = new ColorTerminator(&gColorSensor, stopColor);
+                    gScenarioTracer->addTerminator(gColorTerminator);
+                }
             }
             tracerList.push_back(gScenarioTracer);
 
@@ -208,7 +213,8 @@ void generateTracerList()
             gLineTracer->addTerminator(gDistanceTerminator);
             if(result_size >= 10) {
                 // 色で停止
-                eColor stopColor;
+                eColor stopColor = BLUE;
+                bool hasStopColor = true;
                 if(spl[9] == "BLUE") {
                     stopColor = BLUE;
                 } else if(spl[9] == "RED") {
@@ -217,10 +223,16 @@ void generateTracerList()
                     stopColor = GREEN;
                 } else if(spl[9] == "YELLOW") {
                     stopColor = YELLOW;
+                } else {
+                    hasStopColor = false;
+                    LOGI("Unknown stopColor: %s\n", spl[9].c_str());
                 }
-                LOGI("stopColor: %s\n", colorToString(stopColor));
-                gColorTerminator = new ColorTerminator(&gColorSensor, stopColor);
-                gLineTracer->addTerminator(gColorTerminator);
+
+                if(hasStopColor) {
+                    LOGI("stopColor: %s\n", colorToString(stopColor));
+                    gColorTerminator = new ColorTerminator(&gColorSensor, stopColor);
+                    gLineTracer->addTerminator(gColorTerminator);
+                }
             }
             tracerList.push_back(gLineTracer);
         }
@@ -248,12 +260,12 @@ void generateTracerList()
         //            if (result_size >= 4)
         //            {
         //                pwm = atof(spl[3].c_str());
-        //                printf("RotateTracer(%d, %d, %d): push\n", direction, degree, pwm);
+        //                LOGD("RotateTracer(%d, %d, %d): push\n", direction, degree, pwm);
         //                courseList.push_back(new RotateTracer(direction, degree, pwm));
         //            }
         //            else
         //            {
-        //                printf("RotateTracer(%d, %d): push\n", direction, degree);
+        //                LOGD("RotateTracer(%d, %d): push\n", direction, degree);
         //                courseList.push_back(new RotateTracer(direction, degree));
         //            }
         //        }
@@ -280,20 +292,20 @@ void generateTracerList()
         //            if (result_size == 3)
         //            {
         //                maxTimer = atof(spl[2].c_str());
-        //                printf("DifficultScenarioTracer(%d, %d): push\n", direction, maxTimer);
+        //                LOGD("DifficultScenarioTracer(%d, %d): push\n", direction, maxTimer);
         //                courseList.push_back(new DifficultScenarioTracer(direction, maxTimer));
         //            }
         //            else if (result_size == 4)
         //            {
         //                maxTimer = atof(spl[2].c_str());
         //                maxCnt = atof(spl[3].c_str());
-        //                printf("DifficultScenarioTracer(%d, %d, %d): push\n", direction, maxTimer,
+        //                LOGD("DifficultScenarioTracer(%d, %d, %d): push\n", direction, maxTimer,
         //                maxCnt); courseList.push_back(new DifficultScenarioTracer(direction,
         //                maxTimer, maxCnt));
         //            }
         //            else
         //            {
-        //                printf("DifficultScenarioTracer(%d): push\n", direction);
+        //                LOGD("DifficultScenarioTracer(%d): push\n", direction);
         //                courseList.push_back(new DifficultScenarioTracer(direction));
         //            }
         //        }

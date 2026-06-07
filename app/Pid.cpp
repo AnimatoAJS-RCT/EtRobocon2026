@@ -14,7 +14,7 @@ Pid::Pid(PidGain *_pidGain, unsigned int _differenceRange)
   //// カレントディレクトリ取得
   // getcwd(pathname, PATHNAME_SIZE);
   // strcat(pathname, "/pid.csv");
-  // printf("現在のファイルパス:%s\n", pathname);
+  // LOGD("現在のファイルパス:%s\n", pathname);
   // FILE *file;//ファイルポインタを宣言
   // file=fopen(pathname,"a");//ファイルをオープン(名前の指定)
   // fprintf(file,"init\n");//書き込み
@@ -50,7 +50,7 @@ double Pid::calculatePid(double diff, double delta)
     // 偏差の履歴の数が微分するのに足りる場合：微分する
     double sumX, sumY, sumProd;
     sumX = sumY = sumProd = 0.0;
-    for (int i = 0; i < differenceRange; i++)
+    for (unsigned int i = 0; i < differenceRange; i++)
     {
       sumX += (double)(i + 1);
       sumY += pastDeviations[i];
@@ -60,7 +60,7 @@ double Pid::calculatePid(double diff, double delta)
     double aveY = sumY / (double)differenceRange;
     double cov = sumProd / (double)differenceRange - aveX * aveY; // 共分散
     double varX = 0;                                              // 分散X
-    for (int i = 0; i < differenceRange; i++)
+    for (unsigned int i = 0; i < differenceRange; i++)
     {
       varX += pow((double)(i + 1) - aveX, 2);
     }
@@ -73,7 +73,7 @@ double Pid::calculatePid(double diff, double delta)
     {
       difference = cov / varX / delta;
     }
-    //printf("%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", sumX, sumY, sumProd, aveX, aveY, cov, varX, difference);
+    // LOGD("%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", sumX, sumY, sumProd, aveX, aveY, cov, varX, difference);
   }
 
   // P制御の計算を行う
@@ -86,7 +86,7 @@ double Pid::calculatePid(double diff, double delta)
   // デバッグ用
   LOGD_EVERY(200, "[PID]\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\t%lf\n", diff,
              currentDeviation, integral, difference, p, i, d, (p + i + d));
-  // printf("CV: %lf, PID: %lf\n", currentValue, (p + i + d));
+  // LOGD("CV: %lf, PID: %lf\n", currentValue, (p + i + d));
   //  FIXME:ファイル出力すると書き込みに時間がかかりすぎて走行結果に大きく影響する（書き込みの間、設定したPWMで車輪が動き続けるため）
   // FILE *file;//ファイルポインタを宣言
   // file=fopen(pathname,"a");//ファイルをオープン(名前の指定)

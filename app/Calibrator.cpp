@@ -83,9 +83,7 @@ void Calibrator::execCalibratingBlack()
 {
     LOGI("Calibrating black...\n");
     mBlack = mColorSensor.getReflection();
-    char msg[32];
-    sprintf(msg, "Black: %d", mBlack);
-    LOGI("%s\n", msg);
+    LOGI("Black: %d\n", mBlack);
     tslp_tsk(1000);  // 1s wait
     mState = WAITING_FOR_WHITE;
 }
@@ -116,9 +114,7 @@ void Calibrator::execCalibratingWhite()
 {
     LOGI("Calibrating white...\n");
     mWhite = mColorSensor.getReflection();
-    char msg[32];
-    sprintf(msg, "White: %d", mWhite);
-    LOGI("%s\n", msg);
+    LOGI("White: %d\n", mWhite);
     tslp_tsk(1000);  // 1s wait
     mState = WAITING_FOR_FINISH;
 }
@@ -128,9 +124,7 @@ void Calibrator::execWaitingForFinish()
     static int finishLoop = 0;
     if(finishLoop == 0) {
         LOGI("Finished.\n");
-        char msg[32];
-        sprintf(msg, "Target: %d", getTarget());
-        LOGI("%s\n", msg);
+        LOGI("Target: %d\n", getTarget());
     }
 
     if(finishLoop % 20 == 0) {

@@ -105,8 +105,8 @@ void ScenarioTracer::execWalking()
     correctedLeftPwm = std::max(minLeftPwm, std::min(correctedLeftPwm, maxLeftPwm));
     correctedRightPwm = std::max(minRightPwm, std::min(correctedRightPwm, maxRightPwm));
 
-    printf("Correction: L/R Cnt=%d/%d, Err=%.1f, Corr=%.1f, PWM L/R=%d/%d -> %d/%d\n",
-           leftCount, rightCount, error, correction, mLeftPwm, mRightPwm, correctedLeftPwm, correctedRightPwm);
+        LOGD("Correction: L/R Cnt=%d/%d, Err=%.1f, Corr=%.1f, PWM L/R=%d/%d -> %d/%d\n",
+            leftCount, rightCount, error, correction, mLeftPwm, mRightPwm, correctedLeftPwm, correctedRightPwm);
 
     mWalker->setPwm(correctedLeftPwm, correctedRightPwm);
     mWalker->run();
