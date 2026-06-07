@@ -19,6 +19,15 @@ if [[ -z "$etrobo_root" ]]; then
 	exit 1
 fi
 
+export ETROBO_ROOT="$etrobo_root"
+set +u
+. "$etrobo_root/scripts/etroboenv.sh" silent
+set -u
+
+if [[ -n "${ETROBO_SCRIPTS:-}" && -n "${ETROBO_ATHRILL_GCC:-}" && -n "${ETROBO_TARGET_GCC:-}" ]]; then
+	export PATH=".:$ETROBO_SCRIPTS:$ETROBO_ATHRILL_GCC/bin:$ETROBO_TARGET_GCC/bin:$PATH"
+fi
+
 printf 'pre-push: building %s in %s\n' "$app_name" "$etrobo_root"
 
 pushd "$etrobo_root" >/dev/null
