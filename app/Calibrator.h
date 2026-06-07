@@ -17,17 +17,19 @@ public:
 private:
     void execUndefined();
     void execWaitingForStart();
-    void execSettingCourse();
     void execCalibratingBlack();
+    void execWaitingForWhite();
     void execCalibratingWhite();
+    void execWaitingForFinish();
     void execTerminated();
 
     enum State {
         UNDEFINED,
         WAITING_FOR_START,
-        SETTING_COURSE,
         CALIBRATING_BLACK,
+        WAITING_FOR_WHITE,
         CALIBRATING_WHITE,
+        WAITING_FOR_FINISH,
         TERMINATED
     };
     State mState = UNDEFINED;

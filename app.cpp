@@ -17,7 +17,6 @@
 #include "ColorTerminator.h"
 #include "Calibrator.h"
 #include "Util.h"
-#include "Calibrator.h"
 #include "Log.h"
 
 #include "Light.h"
@@ -330,9 +329,6 @@ static void user_system_create()
     gStarter = new Starter(gForceSensor);
     gCalibrator = new Calibrator(gColorSensor, gForceSensor);
 
-    // キャリブレーションを実行し、コース(L/R)と輝度閾値を決定する
-    gCalibrator->run();
-
     generateTracerList();
 
     // 初期化完了通知
@@ -379,11 +375,18 @@ void main_task(intptr_t unused)
     ercd = stp_cyc(CYC_CALIBRATOR);
     LOGI("[MAIN] stp_cyc(CYC_CALIBRATOR)=%d\n", ercd);
 
-    // キャリブレーション結果をLineTracerに設定
+    int black = gCalibrator->getBlack();
+    int white = gCalibrator->getWhite();
+
+    // 各LineTracerの目標輝度をキャリブレーション結果に基づいて補正する
     for(auto tracer : tracerList) {
         LineTracer* lineTracer = dynamic_cast<LineTracer*>(tracer);
         if(lineTracer != nullptr) {
-            lineTracer->setTargetBrightness(gCalibrator->getTarget());
+            int normalizedTarget = lineTracer->getNormalizedTargetBrightness();
+            int scaledTarget = black + (white - black) * normalizedTarget / 100;
+            lineTracer->setTargetBrightness(scaledTarget);
+            LOGI("[MAIN] LineTracer target: normalized=%d scaled=%d (black=%d white=%d)\n",
+                 normalizedTarget, scaledTarget, black, white);
         }
     }
 
