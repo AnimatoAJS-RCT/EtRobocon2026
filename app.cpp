@@ -74,6 +74,15 @@ static const char* tracerTypeName(const Tracer* tracer)
     return "UnknownTracer";
 }
 
+static void trimLineEnd(char* line)
+{
+    size_t len = strlen(line);
+    while(len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+        line[len - 1] = '\0';
+        len--;
+    }
+}
+
 void generateTracerList()
 {
     // iniファイル読み込み
@@ -109,24 +118,38 @@ void generateTracerList()
         spl = split(lines[idx], " ");
 #else
     LOGI("notsim\n");
+    char currentDir[512];
+    if(getcwd(currentDir, sizeof(currentDir)) == nullptr) {
+        LOGI("failed to get current directory.\n");
+        return;
+    }
+
     char iniPath[512];
-    getcwd(iniPath, 512);  // カレントディレクトリ取得
-    // 常にright.iniを読み込み、Lコース選択時にパラメータを反転させる
-    strcat(iniPath, "/tracer_2025_right.ini");  // カレントディレクトリ配下のiniを指定
+    snprintf(iniPath, sizeof(iniPath), "%s/workspace/EtRobocon2026/tracer.ini", currentDir);
 
     LOGI("tracer.ini読み取り:%s\n", iniPath);
     FILE* file;
     file = fopen(iniPath, "r");  // ファイル読み込み
+    if(file == nullptr) {
+        LOGI("failed to open tracer.ini:%s\n", iniPath);
+        return;
+    }
     char line[512];
 
     // 1行ずつ値を読み取り使用
-    fgets(line, 512, file);
-    line[strlen(line) - 1] = '\0';  // 改行まで読み込んでいるので末尾を削除（終端文字に変更）
+    if(fgets(line, sizeof(line), file) == nullptr) {
+        LOGI("tracer.ini is empty:%s\n", iniPath);
+        fclose(file);
+        return;
+    }
+    trimLineEnd(line);
     while(strcmp(line, "#end") != 0) {
         // LOGD("readini: a%sa, %d\n", line, strcmp(line, "#end"));
         if(line[0] == '#') {
-            fgets(line, 512, file);
-            line[strlen(line) - 1] = '\0';
+            if(fgets(line, sizeof(line), file) == nullptr) {
+                break;
+            }
+            trimLineEnd(line);
             continue;
         }
 
@@ -315,8 +338,10 @@ void generateTracerList()
 #ifndef MAKE_RASPIKE
         idx++;
 #else
-        fgets(line, 512, file);
-        line[strlen(line) - 1] = '\0';
+    if(fgets(line, sizeof(line), file) == nullptr) {
+        break;
+    }
+    trimLineEnd(line);
 #endif
     }
 #ifdef MAKE_RASPIKE
