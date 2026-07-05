@@ -35,7 +35,12 @@
 
 // デストラクタ問題の回避
 // https://github.com/ETrobocon/etroboEV3/wiki/problem_and_coping
-// void *__dso_handle=0;
+#ifndef MAKE_RASPIKE
+extern "C" void* __dso_handle = 0;
+extern "C" void _fini(void) {}
+#else
+// RASPIKE環境では不要
+#endif
 
 bool IS_LEFT_COURSE = false;  // Rコース。デフォルトはRコース。キャリブレーションで変更される。
 
