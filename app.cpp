@@ -45,7 +45,7 @@ extern "C" void _fini(void) {}
 bool IS_LEFT_COURSE = false;  // Rコース。デフォルトはRコース。キャリブレーションで変更される。
 
 using namespace spikeapi;
-
+//test
 // Device objects
 // オブジェクトを静的に確保する
 ColorSensor gColorSensor(EPort::PORT_E);
