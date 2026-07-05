@@ -13,15 +13,22 @@ extern "C" {
 
 #include "spikeapi.h"
 #include "kernel.h"
+#include "kernel_cfg.h"
+
+#ifdef __cplusplus
+#ifdef alignof
+#undef alignof
+#endif
+#endif
 
 #include <stdbool.h>
 
 /*
  *  各タスクの優先度の定義
  */
-#define MAIN_PRIORITY    TMIN_APP_TPRI + 1  /* メインタスクの優先度 */
-#define CALIBRATOR_PRIORITY TMIN_APP_TPRI + 2
-#define TRACER_PRIORITY  TMIN_APP_TPRI + 3
+#define MAIN_PRIORITY       5  /* メインタスク */
+#define CALIBRATOR_PRIORITY 6
+#define TRACER_PRIORITY     7
 
 /*
  *  ターゲットに依存する可能性のある定数の定義
