@@ -35,6 +35,7 @@ public:
                Walker *walker,
                int targetBrightness,
                int pwm,
+               int maxPwm,
                bool _isLeftEdge,
                PidGain *_gain);
 
@@ -47,6 +48,7 @@ private:
     Walker *mWalker;
     int mTargetBrightness;
     int mPwm;
+    int mMaxPwm;
     int mNormalizedTargetBrightness; // iniファイルから読み込んだ目標輝度(0-100)
     bool mIsLeftEdge;
     PidGain *mPidGain;

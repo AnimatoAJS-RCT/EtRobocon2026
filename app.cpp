@@ -220,7 +220,7 @@ void generateTracerList()
                  isLeftEdge ? "LEFT_EDGE" : "RIGHT_EDGE", p, i, d);
             pidGain = new PidGain(p, i, d);
             gLineTracer
-                = new LineTracer(gLineMonitor, gWalker, targetBrightness, pwm, isLeftEdge, pidGain);
+                = new LineTracer(gLineMonitor, gWalker, targetBrightness, pwm, maxPwm, isLeftEdge, pidGain);
             gLineTracer->addStarter(gStarter);
             gLineTracer->addTerminator(gDistanceTerminator);
             if(result_size >= 10) {
