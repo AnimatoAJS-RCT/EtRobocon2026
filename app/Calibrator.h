@@ -23,6 +23,7 @@ private:
     void execSettingCourse();
     void execCalibratingBlack();
     void execCalibratingWhite();
+    void execWaitingForStartConfirmation();
 
     enum State {
         UNDEFINED,
@@ -31,6 +32,7 @@ private:
         SETTING_COURSE,
         CALIBRATING_BLACK,
         CALIBRATING_WHITE,
+        WAITING_FOR_START_CONFIRMATION,
         TERMINATED
     };
     State mState = UNDEFINED;

@@ -32,6 +32,9 @@ void Calibrator::run()
         case CALIBRATING_WHITE:
             execCalibratingWhite();
             break;
+        case WAITING_FOR_START_CONFIRMATION:
+            execWaitingForStartConfirmation();
+            break;
         case TERMINATED:
             break;
         default:
@@ -64,7 +67,7 @@ bool Calibrator::isFinished()
 // 2) RED/BLUE: choose course with LEFT/RIGHT arrow, then press CENTER to confirm.
 // 3) LED OFF: place sensor on black and press force sensor.
 // 4) WHITE: place sensor on white and press force sensor.
-// 5) GREEN: calibration complete.
+// 5) GREEN: confirm the values, then press force sensor to start.
 
 void Calibrator::execUndefined()
 {
@@ -115,8 +118,16 @@ void Calibrator::execCalibratingWhite()
     mLight.turnOnColor(spikeapi::Light::EColor::WHITE);
     if(consumePress()) {
         mWhite = mColorSensor.getReflection();
-        mLight.turnOnColor(spikeapi::Light::EColor::GREEN);
         LOGI("[CAL] white: %d, target: %d\n", mWhite, getTarget());
+        mState = WAITING_FOR_START_CONFIRMATION;
+    }
+}
+
+void Calibrator::execWaitingForStartConfirmation()
+{
+    mLight.turnOnColor(spikeapi::Light::EColor::GREEN);
+    if(consumePress()) {
+        LOGI("[CAL] calibration confirmed\n");
         mState = TERMINATED;
     }
 }
