@@ -55,26 +55,30 @@ std::vector<std::string> split(const std::string& s, const std::string& delimite
 }
 
 eColor getColor(int hue, int saturation, int value) {
-    // 彩度(saturation)と明度(value)が0-255の範囲で与えられることを想定
-    // しきい値を0-100の範囲から調整
-    if (value < 32) {  // 元のしきい値: 20
+    // 暗い領域を優先して黒判定する
+    if(value < 32) {
         return BLACK;
     }
-    if (saturation < 40) {  // 元のしきい値: saturation < 30, value > 80
+
+    // 彩度が低く一定以上明るい領域を白判定する
+    if(saturation < 40 && value >= 32) {
         return WHITE;
     }
-    if (hue < 20 || hue > 340) {
+
+    // 色相ベースの色判定
+    if(hue <= 20 || hue >= 340) {
         return RED;
     }
-    if (hue > 40 && hue < 80) {
+    if(hue >= 40 && hue <= 80) {
         return YELLOW;
     }
-    if (hue > 100 && hue < 160) {
+    if(hue >= 100 && hue <= 160) {
         return GREEN;
     }
-    if (hue > 200 && hue < 280) {
+    if(hue >= 200 && hue <= 280) {
         return BLUE;
     }
+
     return OTHER;
 }
 

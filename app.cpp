@@ -8,9 +8,11 @@
  *****************************************************************************/
 
 #include "app.h"
+#include "kernel_cfg.h"
 #include "Tracer.h"
 #include "LineMonitor.h"
 #include "LineTracer.h"
+#include "ArmTracer.h"
 #include "ScenarioTracer.h"
 #include "Walker.h"
 #include "DistanceTerminator.h"
@@ -52,11 +54,13 @@ ColorSensor gColorSensor(EPort::PORT_E);
 ForceSensor gForceSensor(EPort::PORT_D);
 Motor gLeftWheel(EPort::PORT_B, Motor::EDirection::COUNTERCLOCKWISE, true);
 Motor gRightWheel(EPort::PORT_A, Motor::EDirection::CLOCKWISE, true);
+Motor gArmMotor(EPort::PORT_C, Motor::EDirection::CLOCKWISE, true);
 
 // オブジェクトの定義
 static LineMonitor* gLineMonitor;
 static Walker* gWalker;
 static LineTracer* gLineTracer;
+static ArmTracer* gArmTracer;
 static ScenarioTracer* gScenarioTracer;
 static Starter* gStarter;
 static DistanceTerminator* gDistanceTerminator;
@@ -74,6 +78,9 @@ static const char* tracerTypeName(const Tracer* tracer)
     }
     if(dynamic_cast<const LineTracer*>(tracer) != nullptr) {
         return "LineTracer";
+    }
+    if(dynamic_cast<const ArmTracer*>(tracer) != nullptr) {
+        return "ArmTracer";
     }
 
     return "UnknownTracer";
@@ -97,19 +104,9 @@ void generateTracerList()
 #ifndef MAKE_RASPIKE
     LOGI("sim\n");
     // シミュレーター環境でファイルを読み込めないため固定文字列で設定値を読み込む
-    const std::string lines[] = { "ScenarioTracer 100 40 40",
-                                  "LineTracer 6000 20 50 50 LEFT_EDGE 1.3 0 0.013 BLUE",
-                                  "ScenarioTracer 250 70 68",
-                                  "ScenarioTracer 150 68 70",
-                                  "LineTracer 4000 15 50 50 RIGHT_EDGE 0.7 0 0.005 BLUE",
-                                  "ScenarioTracer 450 74 74",
-                                  "ScenarioTracer 100 50 40",
-                                  "LineTracer 4000 15 50 50 LEFT_EDGE 0.9 0 0.005 BLUE",
-                                  "ScenarioTracer 250 44 70",
-                                  "ScenarioTracer 60 75 50 BLACK",
-                                  "LineTracer 4000 15 40 80 RIGHT_EDGE 0.7 0 0.005 BLUE",
-                                  "ScenarioTracer 200 80 68",
-                                  "LineTracer 6000 15 50 80 LEFT_EDGE 0.7 0 0.005 BLUE",
+    const std::string lines[] = { "ArmTracer -50 500",
+                                  "ScenarioTracer 1000 50 50 RED",
+                                  "ArmTracer 50 500",
                                   "#end" };
     int idx = 0;
     // strcpy((char*)spl, lines[idx]);
@@ -263,6 +260,26 @@ void generateTracerList()
                 }
             }
             tracerList.push_back(gLineTracer);
+        } else if(spl[0] == "ArmTracer") {
+            if(result_size < 3) {
+                LOGI("ArmTracer requires 2 params: ArmTracer <pwm> <duration_ms>\n");
+#ifndef MAKE_RASPIKE
+                idx++;
+#else
+                if(fgets(line, sizeof(line), file) == nullptr) {
+                    break;
+                }
+                trimLineEnd(line);
+#endif
+                continue;
+            }
+
+            int armPwm = atoi(spl[1].c_str());
+            int durationMs = atoi(spl[2].c_str());
+            LOGI("ArmTracer(%d, %d): push\n", armPwm, durationMs);
+            gArmTracer = new ArmTracer(&gArmMotor, armPwm, durationMs);
+            gArmTracer->addStarter(gStarter);
+            tracerList.push_back(gArmTracer);
         }
         // TODO:難所トレーサーの実装
         //        else if (spl[0] == "RotateTracer")
@@ -385,8 +402,10 @@ static void user_system_destroy()
 {
     gLeftWheel.stop();
     gRightWheel.stop();
+    gArmMotor.stop();
     gLeftWheel.resetCount();
     gRightWheel.resetCount();
+    gArmMotor.resetCount();
 
     delete gLineTracer;
     delete gStarter;

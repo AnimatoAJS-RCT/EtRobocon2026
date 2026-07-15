@@ -13,7 +13,6 @@ extern "C" {
 
 #include "spikeapi.h"
 #include "kernel.h"
-#include "kernel_cfg.h"
 
 #ifdef __cplusplus
 #ifdef alignof
