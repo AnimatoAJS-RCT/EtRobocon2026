@@ -2,11 +2,11 @@
 
 #include "Log.h"
 
-ArmTracer::ArmTracer(spikeapi::Motor* armMotor, int armPwm, int durationMs)
+ArmTracer::ArmTracer(spikeapi::Motor* armMotor, int armPwm, int targetAngle)
     : mArmMotor(armMotor),
       mArmPwm(armPwm),
-      mDurationMs(durationMs > 0 ? durationMs : 0),
-      mElapsedMs(0),
+    mTargetAngle(targetAngle),
+    mStartCount(0),
       mIsInitialized(false)
 {
     mState = UNDEFINED;
@@ -17,7 +17,7 @@ void ArmTracer::run()
     switch(mState) {
         case UNDEFINED:
             if(!mIsInitialized) {
-                mElapsedMs = 0;
+                mStartCount = mArmMotor->getCount();
                 mIsInitialized = true;
             }
             mState = WAITING_FOR_START;
@@ -40,26 +40,35 @@ void ArmTracer::run()
                 }
             }
             break;
-        case WALKING:
+        case WALKING: {
             mArmMotor->setPower(mArmPwm);
-            mElapsedMs += LOOP_INTERVAL_MS;
 
             for(auto terminator : mTerminatorList) {
                 if(terminator->isToBeTerminate()) {
-                    mArmMotor->stop();
+                    mArmMotor->brake();
                     mState = TERMINATED;
-                    LOGI("[ARM] terminated by terminator (pwm=%d, elapsed=%dms)\n", mArmPwm,
-                         mElapsedMs);
+                    LOGI("[ARM] terminated by terminator (pwm=%d, angle=%ddeg)\n", mArmPwm,
+                         mArmMotor->getCount() - mStartCount);
                     return;
                 }
             }
 
-            if(mElapsedMs >= mDurationMs) {
-                mArmMotor->stop();
+            int movedAngle = mArmMotor->getCount() - mStartCount;
+            bool isTargetReached = (mTargetAngle >= 0) ? (movedAngle >= mTargetAngle)
+                                                       : (movedAngle <= mTargetAngle);
+            if(isTargetReached) {
+                mArmMotor->brake();
                 mState = TERMINATED;
-                LOGI("[ARM] completed (pwm=%d, duration=%dms)\n", mArmPwm, mDurationMs);
+                LOGI("[ARM] completed (pwm=%d, target=%ddeg, moved=%ddeg)\n", mArmPwm,
+                     mTargetAngle, movedAngle);
+            } else if(mArmMotor->isStalled()) {
+                mArmMotor->brake();
+                mState = TERMINATED;
+                LOGI("[ARM] stalled (pwm=%d, target=%ddeg, moved=%ddeg)\n", mArmPwm,
+                     mTargetAngle, movedAngle);
             }
             break;
+            }
         case TERMINATED:
             break;
         default:

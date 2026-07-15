@@ -1,5 +1,15 @@
 mkfile_path := $(dir $(lastword $(MAKEFILE_LIST)))
 
+# Embed the editable tracer.ini into the real-hardware firmware as a C++ string.
+TRACER_CONFIG_HEADER := $(mkfile_path)app/TracerConfig.h
+
+$(TRACER_CONFIG_HEADER): $(mkfile_path)tracer.ini
+	@printf '%s\n' '#ifndef ETTR_APP_TRACERCONFIG_H_' '#define ETTR_APP_TRACERCONFIG_H_' '' 'static const char kTracerIni[] = R"ETROBO(' > $@
+	@cat $< >> $@
+	@printf '%s\n' ')ETROBO";' '' '#endif  // ETTR_APP_TRACERCONFIG_H_' >> $@
+
+$(OBJDIR)/app.o: $(TRACER_CONFIG_HEADER)
+
 # Shellスクリプトで、app,unitディレクトリ中のソースコード名をオブジェクトファイル名に変換している
 APPL_CXXOBJS += $(shell ls ${mkfile_path}unit/*.cpp | sed -r 's/.*\/(.*)\.cpp/\1.o/g')
 APPL_CXXOBJS += $(shell ls ${mkfile_path}app/*.cpp | sed -r 's/.*\/(.*)\.cpp/\1.o/g')

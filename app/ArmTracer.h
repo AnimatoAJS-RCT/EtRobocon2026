@@ -12,16 +12,14 @@
 
 class ArmTracer : public Tracer {
    public:
-    ArmTracer(spikeapi::Motor* armMotor, int armPwm, int durationMs);
+    ArmTracer(spikeapi::Motor* armMotor, int armPwm, int targetAngle);
     void run() override;
 
    private:
-    static const int LOOP_INTERVAL_MS = 10;
-
     spikeapi::Motor* mArmMotor;
     int mArmPwm;
-    int mDurationMs;
-    int mElapsedMs;
+    int mTargetAngle;
+    int mStartCount;
     bool mIsInitialized;
 };
 
