@@ -43,9 +43,9 @@ bool ColorTerminator::isToBeTerminate()
     // Reduce periodic log flooding: print on color change, periodic sample, or terminate match.
     if(!mHasLastLoggedColor || (mLastLoggedColor != c) || (mLogCounter % 100 == 0)
        || isTerminate) {
-      LOGD("[COLOR_TERM] h=%u\ts=%u\tv=%u\tcolor=%s\ttarget=%s\traw=%d\tstreak=%d\tmatch=%d\n",
-         hsv.h, hsv.s, hsv.v, colorToString(c), colorToString(mTermColor),
-         isRawMatch ? 1 : 0, mConsecutiveMatchCount, isTerminate ? 1 : 0);
+      //LOGD("[COLOR_TERM] h=%u\ts=%u\tv=%u\tcolor=%s\ttarget=%s\traw=%d\tstreak=%d\tmatch=%d\n",
+      //   hsv.h, hsv.s, hsv.v, colorToString(c), colorToString(mTermColor),
+      //   isRawMatch ? 1 : 0, mConsecutiveMatchCount, isTerminate ? 1 : 0);
         mLastLoggedColor = c;
         mHasLastLoggedColor = true;
     }
