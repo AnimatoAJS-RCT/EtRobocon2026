@@ -4,6 +4,13 @@ APPL_CFLAGS += -DETROBO_PHYSICAL_BUILD
 APPL_CXXFLAGS += -DETROBO_PHYSICAL_BUILD
 endif
 
+HUB_NAME_SOURCE := $(mkfile_path)HUB_NAME
+HUB_NAME_TARGET := $(abspath $(mkfile_path)../../spike-rt/sdk/workspace/HUB_NAME)
+
+ifneq ($(wildcard $(HUB_NAME_SOURCE)),)
+$(shell mkdir -p $(dir $(HUB_NAME_TARGET)) && cp $(HUB_NAME_SOURCE) $(HUB_NAME_TARGET))
+endif
+
 # Embed the editable tracer.ini into the real-hardware firmware as a C++ string.
 TRACER_CONFIG_HEADER := $(mkfile_path)app/TracerConfig.h
 
