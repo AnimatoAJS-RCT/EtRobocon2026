@@ -3,7 +3,7 @@
 #include <algorithm>  // for std::max, std::min
 
 // 回転数差を補正するためのPゲイン
-const double ScenarioTracer::Kp = 0.05;
+const double ScenarioTracer::Kp = 0.02;
 // PWM補正値のクリッピング割合
 const double ScenarioTracer::PWM_CORRECTION_LIMIT_RATIO = 0.2;
 
@@ -11,6 +11,8 @@ ScenarioTracer::ScenarioTracer(Walker* walker, int leftPwm, int rightPwm)
     : mWalker(walker),
         mLeftPwm(leftPwm),
         mRightPwm(rightPwm),
+        mStartLeftCount(0),
+        mStartRightCount(0),
         mIsInitialized(false),
         mLastLoggedState(-1)
 {
@@ -37,8 +39,7 @@ void ScenarioTracer::run()
                 for(auto terminator : mTerminatorList) {
                     terminator->init();
                 }
-                mWalker->setPwm(mLeftPwm, mRightPwm);
-                mState = WALKING;
+                startWalking();
                 return;
             }
             for(auto starter : mStarterList) {
@@ -46,8 +47,7 @@ void ScenarioTracer::run()
                     for(auto terminator : mTerminatorList) {
                         terminator->init();
                     }
-                    mWalker->setPwm(mLeftPwm, mRightPwm);
-                    mState = WALKING;
+                    startWalking();
                     return;
                 }
             }
@@ -66,8 +66,8 @@ void ScenarioTracer::run()
 void ScenarioTracer::execWalking()
 {
     // 目標のPWM比に従って回転数が追従するように補正をかける
-    int leftCount = mWalker->getLeftCount();
-    int rightCount = mWalker->getRightCount();
+    int leftCount = mWalker->getLeftCount() - mStartLeftCount;
+    int rightCount = mWalker->getRightCount() - mStartRightCount;
 
     // 目標回転数比と現在回転数比の誤差を計算
     // error = leftCount * mRightPwm - rightCount * mLeftPwm
@@ -90,7 +90,7 @@ void ScenarioTracer::execWalking()
         correctedRightPwm = mRightPwm - static_cast<int>(correction);
     }
 
-    // 補正後のPWM値が目標値から大きく外れないように、目標値の±10%の範囲にクリッピングする
+    // 補正後のPWM値が目標値から大きく外れないように、目標値の±20%の範囲にクリッピングする
     // 1. 左右それぞれの変動幅（マージン）を計算
     int leftMargin = static_cast<int>(std::abs(mLeftPwm) * PWM_CORRECTION_LIMIT_RATIO);
     int rightMargin = static_cast<int>(std::abs(mRightPwm) * PWM_CORRECTION_LIMIT_RATIO);
@@ -105,9 +105,9 @@ void ScenarioTracer::execWalking()
     correctedLeftPwm = std::max(minLeftPwm, std::min(correctedLeftPwm, maxLeftPwm));
     correctedRightPwm = std::max(minRightPwm, std::min(correctedRightPwm, maxRightPwm));
 
-        LOGD("Correction: L/R Cnt=%d/%d, Err=%.1f, Corr=%.1f, PWM L/R=%d/%d -> %d/%d\n",
-            leftCount, rightCount, error, correction, mLeftPwm, mRightPwm, correctedLeftPwm, correctedRightPwm);
-
+    LOGD_EVERY(50, "[SCENARIO] correction: L/R Cnt=%d/%d, Err=%.1f, Corr=%.1f, PWM L/R=%d/%d -> %d/%d\n",
+               leftCount, rightCount, error, correction, mLeftPwm, mRightPwm, correctedLeftPwm,
+               correctedRightPwm);
     mWalker->setPwm(correctedLeftPwm, correctedRightPwm);
     mWalker->run();
 
@@ -122,4 +122,12 @@ void ScenarioTracer::execWalking()
             return;
         }
     }
+}
+
+void ScenarioTracer::startWalking()
+{
+    mStartLeftCount = mWalker->getLeftCount();
+    mStartRightCount = mWalker->getRightCount();
+    mWalker->setPwm(mLeftPwm, mRightPwm);
+    mState = WALKING;
 }
