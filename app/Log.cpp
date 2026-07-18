@@ -1,5 +1,6 @@
 #include "Log.h"
 #include "app.h"
+#include "kernel_cfg.h"
 
 #include <kernel.h>
 #include <syssvc/serial.h>
