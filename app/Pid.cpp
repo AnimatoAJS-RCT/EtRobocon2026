@@ -9,7 +9,7 @@
 PidGain::PidGain(double _kp, double _ki, double _kd) : kp(_kp), ki(_ki), kd(_kd) {}
 
 Pid::Pid(PidGain *_pidGain, unsigned int _differenceRange)
-    : gain(_pidGain), integral(0.0), differenceRange(_differenceRange)
+  : gain(_pidGain), integral(0.0), integralLimit(0.0), differenceRange(_differenceRange)
 {
   //// カレントディレクトリ取得
   // getcwd(pathname, PATHNAME_SIZE);
@@ -21,6 +21,17 @@ Pid::Pid(PidGain *_pidGain, unsigned int _differenceRange)
   // fclose(file);//ファイルを閉じる
 }
 
+void Pid::reset()
+{
+  integral = 0.0;
+  pastDeviations.clear();
+}
+
+void Pid::setIntegralLimit(double limit)
+{
+  integralLimit = limit;
+}
+
 double Pid::calculatePid(double diff, double delta)
 {
   // 0除算を避けるためにdelta=0の場合はデフォルト周期0.01とする
@@ -30,6 +41,10 @@ double Pid::calculatePid(double diff, double delta)
   double currentDeviation = diff;
   // 積分の処理を行う
   integral += currentDeviation * delta;
+  if(integralLimit > 0.0) {
+    if(integral > integralLimit) integral = integralLimit;
+    if(integral < -integralLimit) integral = -integralLimit;
+  }
   // 微分の処理を行う
   // 過去偏差数を超過する偏差の履歴を消す
   while (pastDeviations.size() >= differenceRange)
