@@ -18,6 +18,7 @@
 #include "LineTracer.h"
 #include "ArmTracer.h"
 #include "ScenarioTracer.h"
+#include "UltrasonicAlignTracer.h"
 #include "Walker.h"
 #include "DistanceTerminator.h"
 #include "ColorTerminator.h"
@@ -60,6 +61,7 @@ ForceSensor gForceSensor(EPort::PORT_D);
 Motor gLeftWheel(EPort::PORT_B, Motor::EDirection::COUNTERCLOCKWISE, true);
 Motor gRightWheel(EPort::PORT_A, Motor::EDirection::CLOCKWISE, true);
 Motor gArmMotor(EPort::PORT_C, Motor::EDirection::CLOCKWISE, true);
+UltrasonicSensor gUltrasonicSensor(EPort::PORT_F);
 Light gStatusLight;  // キャリブレーションの状態表示に使うステータスライト
 
 // オブジェクトの定義
@@ -68,6 +70,7 @@ static Walker* gWalker;
 static LineTracer* gLineTracer;
 static ArmTracer* gArmTracer;
 static ScenarioTracer* gScenarioTracer;
+static UltrasonicAlignTracer* gUltrasonicAlignTracer;
 static Starter* gStarter;
 static DistanceTerminator* gDistanceTerminator;
 static ColorTerminator* gColorTerminator;
@@ -87,6 +90,9 @@ static const char* tracerTypeName(const Tracer* tracer)
     }
     if(dynamic_cast<const ArmTracer*>(tracer) != nullptr) {
         return "ArmTracer";
+    }
+    if(dynamic_cast<const UltrasonicAlignTracer*>(tracer) != nullptr) {
+        return "UltrasonicAlignTracer";
     }
 
     return "UnknownTracer";
@@ -266,6 +272,39 @@ void generateTracerList()
             gArmTracer = new ArmTracer(&gArmMotor, armPwm, targetAngle);
             gArmTracer->addStarter(gStarter);
             tracerList.push_back(gArmTracer);
+        } else if(spl[0] == "UltrasonicAlignTracer") {
+            if(result_size < 6) {
+                LOGI("UltrasonicAlignTracer requires 5 params: <half_sweep_deg> <turn_pwm> "
+                     "<step_deg> <sample_count> <max_distance_mm>\n");
+#ifndef SPIKERT
+                idx++;
+#else
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+#endif
+                continue;
+            }
+
+            int halfSweepAngleDeg = atoi(spl[1].c_str());
+            int turnPwm = atoi(spl[2].c_str());
+            int stepAngleDeg = atoi(spl[3].c_str());
+            int sampleCount = atoi(spl[4].c_str());
+            int maxDistanceMm = atoi(spl[5].c_str());
+            double wheelDegreesPerBodyDegree = result_size >= 7 ? atof(spl[6].c_str()) : 14.0 / 9.0;
+            int centerBandMm = result_size >= 8 ? atoi(spl[7].c_str()) : 15;
+            if(gUltrasonicSensor.hasError()) {
+                LOGI("UltrasonicAlignTracer skipped: ultrasonic sensor is unavailable on PORT_F\n");
+            } else {
+                 LOGI("UltrasonicAlignTracer(%ddeg, %d, %ddeg, %d, %dmm, %.2f, %dmm): push\n",
+                     halfSweepAngleDeg, turnPwm, stepAngleDeg, sampleCount, maxDistanceMm,
+                     wheelDegreesPerBodyDegree, centerBandMm);
+                gUltrasonicAlignTracer = new UltrasonicAlignTracer(
+                    gWalker, &gUltrasonicSensor, halfSweepAngleDeg, turnPwm, stepAngleDeg,
+                    sampleCount, maxDistanceMm, wheelDegreesPerBodyDegree, centerBandMm);
+                gUltrasonicAlignTracer->addStarter(gStarter);
+                tracerList.push_back(gUltrasonicAlignTracer);
+            }
         }
         // TODO:難所トレーサーの実装
         //        else if (spl[0] == "RotateTracer")

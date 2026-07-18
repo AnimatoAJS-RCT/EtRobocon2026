@@ -38,6 +38,12 @@ void Walker::stop()
     mRightWheel.stop();
 }
 
+void Walker::brake()
+{
+    mLeftWheel.brake();
+    mRightWheel.brake();
+}
+
 /**
  * 走行に必要なものをリセットする
  */
