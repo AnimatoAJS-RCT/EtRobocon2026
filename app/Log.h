@@ -1,7 +1,13 @@
 #ifndef ETTR_APP_LOG_H_
 #define ETTR_APP_LOG_H_
 
+#include <stdarg.h>
 #include <stdio.h>
+
+void ettr_log_set_bluetooth_mode(bool enabled);
+bool ettr_log_wait_for_bluetooth(void);
+void ettr_log_write(const char* fmt, ...);
+void ettr_log_write_v(const char* fmt, va_list ap);
 
 // Log level: 0=off, 1=error, 2=warn, 3=info, 4=debug
 #ifndef ETTR_LOG_LEVEL
@@ -19,7 +25,7 @@
 #define ETTR_LOG(level, fmt, ...)                                                     \
     do {                                                                              \
         if(ETTR_LOG_LEVEL >= (level)) {                                               \
-            printf((fmt), ##__VA_ARGS__);                                             \
+            ettr_log_write((fmt), ##__VA_ARGS__);                                     \
         }                                                                             \
     } while(0)
 
@@ -29,7 +35,7 @@
             static unsigned int ETTR_LOG_CONCAT(_ettr_log_counter_, __LINE__) = 0U;  \
             unsigned int *cnt = &ETTR_LOG_CONCAT(_ettr_log_counter_, __LINE__);       \
             if(((*cnt)++ % (unsigned int)(interval)) == 0U) {                         \
-                printf((fmt), ##__VA_ARGS__);                                         \
+                ettr_log_write((fmt), ##__VA_ARGS__);                                 \
             }                                                                         \
         }                                                                             \
     } while(0)

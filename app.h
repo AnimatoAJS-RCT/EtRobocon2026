@@ -29,6 +29,7 @@ extern "C" {
 #define MAIN_PRIORITY       5  /* メインタスク */
 #define CALIBRATOR_PRIORITY 6
 #define TRACER_PRIORITY     7
+#define BT_SENDER_PRIORITY  8
 #else
 /* シミュレータ(athrill): APP_INIT_TASK(TMIN_TPRI+6)がヒープ初期化と
  * グローバルコンストラクタを実行するため、それより低い優先度にしないと
@@ -56,6 +57,7 @@ extern bool IS_LEFT_COURSE; // Lコース
 extern void main_task(intptr_t exinf);
 extern void calibrator_task(intptr_t exinf);
 extern void tracer_task(intptr_t exinf);
+extern void sender_task(intptr_t exinf);
 extern void ev3_cyc_tracer(intptr_t exinf);
 
 #endif /* TOPPERS_MACRO_ONLY */

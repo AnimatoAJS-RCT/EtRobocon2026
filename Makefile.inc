@@ -1,4 +1,8 @@
 mkfile_path := $(dir $(lastword $(MAKEFILE_LIST)))
+ifeq ($(ETROBO_ENV_TARGET),physical)
+APPL_CFLAGS += -DETROBO_PHYSICAL_BUILD
+APPL_CXXFLAGS += -DETROBO_PHYSICAL_BUILD
+endif
 
 # Embed the editable tracer.ini into the real-hardware firmware as a C++ string.
 TRACER_CONFIG_HEADER := $(mkfile_path)app/TracerConfig.h

@@ -14,8 +14,16 @@ Calibrator::Calibrator(const spikeapi::ColorSensor& colorSensor,
 
 void Calibrator::run()
 {
-    updateButtonState();
 
+   updateButtonState(); 
+   while(!ettr_log_wait_for_bluetooth()) {
+        if(mForceSensor.isTouched()) {
+            LOGI("[CAL] skip bluetooth wait by force sensor\n");
+            break;
+        }
+        tslp_tsk(100);
+    }
+    
     switch(mState) {
         case UNDEFINED:
             execUndefined();
@@ -95,6 +103,12 @@ void Calibrator::execWaitingForStart()
         LOGI("[CAL] start pressed\n");
         mState = SETTING_COURSE;
     }
+
+    while(mForceSensor.isTouched()) {
+        tslp_tsk(50);
+    }
+
+    mState = CALIBRATING_BLACK;
 }
 
 void Calibrator::execSettingCourse()

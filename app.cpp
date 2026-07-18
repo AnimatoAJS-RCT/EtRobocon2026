@@ -144,7 +144,7 @@ void generateTracerList()
             rightPwm = atof(spl[3].c_str());
 
             // Lコースの場合、左右のPWMを入れ替える
-            if (IS_LEFT_COURSE) {
+            if(IS_LEFT_COURSE) {
                 int tmp = leftPwm;
                 leftPwm = rightPwm;
                 rightPwm = tmp;
@@ -194,7 +194,7 @@ void generateTracerList()
             isLeftEdge = (strcmp(spl[5].c_str(), "LEFT_EDGE") == 0);
 
             // Lコースの場合、エッジを反転させる
-            if (IS_LEFT_COURSE) {
+            if(IS_LEFT_COURSE) {
                 isLeftEdge = !isLeftEdge;
             }
 
