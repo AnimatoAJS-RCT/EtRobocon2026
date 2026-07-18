@@ -1,2 +1,6 @@
 *:Zone.Identifier
 .vscode
+
+# makeの生成物
+app/TracerConfig.h
+build/
