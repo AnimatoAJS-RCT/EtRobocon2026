@@ -26,7 +26,7 @@ void DistanceTerminator::init()
 {
     mInitialDistance = calcCurrentDistance();
         mCheckCount = 0;
-        LOGI("[DIST_TERM] init: initial=%f target=%f\n", mInitialDistance, mTargetDistance);
+        //LOGI("[DIST_TERM] init: initial=%f target=%f\n", mInitialDistance, mTargetDistance);
 }
 
 bool DistanceTerminator::isToBeTerminate()

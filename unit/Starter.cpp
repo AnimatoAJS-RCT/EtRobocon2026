@@ -24,6 +24,14 @@ Starter::Starter(const spikeapi::ForceSensor& forceSensor) : mForceSensor(forceS
  */
 bool Starter::isPushed()
 {
+#ifndef SPIKERT
+    // シミュレータ: フォースセンサの代わりに、シミュレータの計測タイム
+    // (athrill RXデータ領域 0x090F0000+500、GOの瞬間に0から増加するms値)を監視し、
+    // カウントダウン終了(GO)と同時に自動スタートする。
+    if(*(volatile unsigned int*)(0x090F0000 + 500) != 0) {
+        mIsStarted = true;
+    }
+#endif
     if (mForceSensor.isTouched()) {
         mIsStarted = true;
     }

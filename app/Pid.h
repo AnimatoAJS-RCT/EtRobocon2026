@@ -39,11 +39,14 @@ public:
    * @return PIDの計算結果(操作量)
    */
   double calculatePid(double currentValue, double delta = 0.01);
+  void reset();
+  void setIntegralLimit(double limit);
 
 private:
   PidGain *gain;
   std::vector<double> pastDeviations; // 過去の偏差
   double integral;                    // 偏差の累積
+  double integralLimit;               // 偏差累積の絶対値上限。0以下は無制限
   unsigned int differenceRange;       // 微分に使用する過去の偏差の数
   char pathname[PATHNAME_SIZE];  // ファイルパス
 };

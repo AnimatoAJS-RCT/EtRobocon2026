@@ -31,6 +31,7 @@ class ColorTerminator : public Terminator {
     int mLogCounter;
     bool mHasLastLoggedColor;
     eColor mLastLoggedColor;
+    int mConsecutiveMatchCount;
 };
 
 #endif  // ETTR_UNIT_ColorTerminator_H_

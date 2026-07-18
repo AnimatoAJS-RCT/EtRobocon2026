@@ -3,11 +3,14 @@
 
 #include "ColorSensor.h"
 #include "ForceSensor.h"
+#include "Light.h"
+#include "Button.h"
 
 class Calibrator {
 public:
     explicit Calibrator(const spikeapi::ColorSensor& colorSensor,
-                        const spikeapi::ForceSensor& forceSensor);
+                        const spikeapi::ForceSensor& forceSensor,
+                        spikeapi::Light& light);
     void run();
     int getBlack();
     int getWhite();
@@ -17,28 +20,35 @@ public:
 private:
     void execUndefined();
     void execWaitingForStart();
+    void execSettingCourse();
     void execCalibratingBlack();
-    void execWaitingForWhite();
     void execCalibratingWhite();
-    void execWaitingForFinish();
-    void execTerminated();
+    void execWaitingForStartConfirmation();
 
     enum State {
         UNDEFINED,
         WAITING_FOR_START,
+        // LEFT/RIGHT selects the course and CENTER confirms it.
+        SETTING_COURSE,
         CALIBRATING_BLACK,
-        WAITING_FOR_WHITE,
         CALIBRATING_WHITE,
-        WAITING_FOR_FINISH,
+        WAITING_FOR_START_CONFIRMATION,
         TERMINATED
     };
     State mState = UNDEFINED;
 
     const spikeapi::ColorSensor& mColorSensor;
     const spikeapi::ForceSensor& mForceSensor;
+    spikeapi::Light& mLight;
+    spikeapi::Button mButton;
     int mBlack = 0;
     int mWhite = 100;
     bool mIsInitialized = false;
+    bool mWasTouched = false;
+    bool mPressPending = false;
+
+    void updateButtonState();
+    bool consumePress();
 };
 
 #endif  // ETTR_APP_CALIBRATOR_H_

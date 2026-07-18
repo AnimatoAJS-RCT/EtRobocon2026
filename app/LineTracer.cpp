@@ -18,18 +18,22 @@ const int LineTracer::bias = 0;
  * @param lineMonitor     ライン判定
  * @param walker 走行
  */
-LineTracer::LineTracer(LineMonitor* lineMonitor, Walker* walker, int targetBrightness, int pwm, bool isLeftEdge,
-                       PidGain* pidGain)
+LineTracer::LineTracer(LineMonitor* lineMonitor, Walker* walker, int targetBrightness, int pwm, int maxPwm,
+                                             bool isLeftEdge, PidGain* pidGain)
   : mLineMonitor(lineMonitor),
     mWalker(walker),
     mTargetBrightness(targetBrightness),
     mPwm(pwm),
+        mMaxPwm(maxPwm),
         mNormalizedTargetBrightness(targetBrightness),
     mIsLeftEdge(isLeftEdge),
     mPidGain(pidGain),
     mIsInitialized(false),
     mPid(pidGain, 2)
 {
+    if(pidGain->ki != 0.0) {
+        mPid.setIntegralLimit(maxPwm / (pidGain->ki > 0.0 ? pidGain->ki : -pidGain->ki));
+    }
 }
 
 /**
@@ -99,6 +103,7 @@ void LineTracer::execWaitingForStart()
         for(auto terminator : mTerminatorList) {
             terminator->init();
         }
+        mPid.reset();
         mLineMonitor->setThreshold(mTargetBrightness);
         mState = WALKING;
         return;
@@ -109,6 +114,7 @@ void LineTracer::execWaitingForStart()
             for(auto terminator : mTerminatorList) {
                 terminator->init();
             }
+            mPid.reset();
             mLineMonitor->setThreshold(mTargetBrightness);
             mState = WALKING;
             return;
@@ -128,7 +134,13 @@ void LineTracer::execWalking()
     if (mIsLeftEdge) {
         turn = -turn;
     }
-    mWalker->setPwm(mPwm - turn, mPwm + turn);
+    int leftPwm = mPwm - turn;
+    int rightPwm = mPwm + turn;
+    if(leftPwm > mMaxPwm) leftPwm = mMaxPwm;
+    if(leftPwm < -mMaxPwm) leftPwm = -mMaxPwm;
+    if(rightPwm > mMaxPwm) rightPwm = mMaxPwm;
+    if(rightPwm < -mMaxPwm) rightPwm = -mMaxPwm;
+    mWalker->setPwm(leftPwm, rightPwm);
 
     // 走行を行う
     mWalker->run();

@@ -21,6 +21,7 @@ public:
     void init();
     void run();
     void stop();
+    void brake();
     void setPwm(int leftPwm, int rightPwm);
     int getLeftCount();
     int getRightCount();
