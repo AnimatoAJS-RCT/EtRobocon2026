@@ -12,6 +12,24 @@ Calibrator::Calibrator(const spikeapi::ColorSensor& colorSensor,
 
 void Calibrator::run()
 {
+#ifndef ETROBO_PHYSICAL_BUILD
+    LOGI("[CAL] run entry: sim branch\n");
+#else
+    LOGI("[CAL] run entry: physical branch\n");
+#endif
+#ifndef ETROBO_PHYSICAL_BUILD
+    mState = TERMINATED;
+    return;
+#endif
+
+    while(!ettr_log_wait_for_bluetooth()) {
+        if(mForceSensor.isTouched()) {
+            LOGI("[CAL] skip bluetooth wait by force sensor\n");
+            break;
+        }
+        tslp_tsk(100);
+    }
+
     while(1) {
         switch(mState) {
             case UNDEFINED:
@@ -74,9 +92,14 @@ void Calibrator::execWaitingForStart()
 {
     LOGI("Calibrate: Push to start\n");
     while(!mForceSensor.isTouched()) {
-        mState = CALIBRATING_BLACK;
         tslp_tsk(500);  // 500ms wait
     }
+
+    while(mForceSensor.isTouched()) {
+        tslp_tsk(50);
+    }
+
+    mState = CALIBRATING_BLACK;
 }
 
 void Calibrator::execCalibratingBlack()
@@ -100,6 +123,9 @@ void Calibrator::execWaitingForWhite()
 
     if(mForceSensor.isTouched()) {
         LOGI("[CAL] WAITING_FOR_WHITE -> CALIBRATING_WHITE\n");
+        while(mForceSensor.isTouched()) {
+            tslp_tsk(50);
+        }
         mState = CALIBRATING_WHITE;
         tslp_tsk(500);  // 500ms wait
         waitLoop = 0;
@@ -134,6 +160,9 @@ void Calibrator::execWaitingForFinish()
 
     if(mForceSensor.isTouched()) {
         LOGI("[CAL] WAITING_FOR_FINISH -> TERMINATED\n");
+        while(mForceSensor.isTouched()) {
+            tslp_tsk(50);
+        }
         mState = TERMINATED;
         finishLoop = 0;
         return;

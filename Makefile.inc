@@ -1,6 +1,10 @@
 mkfile_path := $(dir $(lastword $(MAKEFILE_LIST)))
+ifeq ($(ETROBO_ENV_TARGET),physical)
+APPL_CFLAGS += -DETROBO_PHYSICAL_BUILD
+APPL_CXXFLAGS += -DETROBO_PHYSICAL_BUILD
+endif
 
-# ShellƒXƒNƒŠƒvƒg‚ÅAapp,unitƒfƒBƒŒƒNƒgƒŠ’†‚Ìƒ\[ƒXƒR[ƒh–¼‚ðƒIƒuƒWƒFƒNƒgƒtƒ@ƒCƒ‹–¼‚É•ÏŠ·‚µ‚Ä‚¢‚é
+# Shellï¿½Xï¿½Nï¿½ï¿½ï¿½vï¿½gï¿½ÅAapp,unitï¿½fï¿½Bï¿½ï¿½ï¿½Nï¿½gï¿½ï¿½ï¿½ï¿½ï¿½Ìƒ\ï¿½[ï¿½Xï¿½Rï¿½[ï¿½hï¿½ï¿½ï¿½ï¿½ï¿½Iï¿½uï¿½Wï¿½Fï¿½Nï¿½gï¿½tï¿½@ï¿½Cï¿½ï¿½ï¿½ï¿½ï¿½É•ÏŠï¿½ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½ï¿½
 APPL_CXXOBJS += $(shell ls ${mkfile_path}unit/*.cpp | sed -r 's/.*\/(.*)\.cpp/\1.o/g')
 APPL_CXXOBJS += $(shell ls ${mkfile_path}app/*.cpp | sed -r 's/.*\/(.*)\.cpp/\1.o/g')
 

@@ -94,72 +94,8 @@ void generateTracerList()
     std::vector<std::string> spl;
     size_t result_size;
 
-#ifndef MAKE_RASPIKE
-    LOGI("sim\n");
-    // シミュレーター環境でファイルを読み込めないため固定文字列で設定値を読み込む
-    const std::string lines[] = { "ScenarioTracer 100 40 40",
-                                  "LineTracer 6000 20 50 50 LEFT_EDGE 1.3 0 0.013 BLUE",
-                                  "ScenarioTracer 250 70 68",
-                                  "ScenarioTracer 150 68 70",
-                                  "LineTracer 4000 15 50 50 RIGHT_EDGE 0.7 0 0.005 BLUE",
-                                  "ScenarioTracer 450 74 74",
-                                  "ScenarioTracer 100 50 40",
-                                  "LineTracer 4000 15 50 50 LEFT_EDGE 0.9 0 0.005 BLUE",
-                                  "ScenarioTracer 250 44 70",
-                                  "ScenarioTracer 60 75 50 BLACK",
-                                  "LineTracer 4000 15 40 80 RIGHT_EDGE 0.7 0 0.005 BLUE",
-                                  "ScenarioTracer 200 80 68",
-                                  "LineTracer 6000 15 50 80 LEFT_EDGE 0.7 0 0.005 BLUE",
-                                  "#end" };
-    int idx = 0;
-    // strcpy((char*)spl, lines[idx]);
-    while(lines[idx] != "#end") {
-        LOGD("readini: %s\n", lines[idx].c_str());
-        if(lines[idx][0] == '#') {
-            idx++;
-            continue;
-        }
-
-        spl = split(lines[idx], " ");
-#else
-    LOGI("notsim\n");
-    char currentDir[512];
-    if(getcwd(currentDir, sizeof(currentDir)) == nullptr) {
-        LOGI("failed to get current directory.\n");
-        return;
-    }
-
-    char iniPath[512];
-    snprintf(iniPath, sizeof(iniPath), "%s/workspace/EtRobocon2026/tracer.ini", currentDir);
-
-    LOGI("tracer.ini読み取り:%s\n", iniPath);
-    FILE* file;
-    file = fopen(iniPath, "r");  // ファイル読み込み
-    if(file == nullptr) {
-        LOGI("failed to open tracer.ini:%s\n", iniPath);
-        return;
-    }
-    char line[512];
-
-    // 1行ずつ値を読み取り使用
-    if(fgets(line, sizeof(line), file) == nullptr) {
-        LOGI("tracer.ini is empty:%s\n", iniPath);
-        fclose(file);
-        return;
-    }
-    trimLineEnd(line);
-    while(strcmp(line, "#end") != 0) {
-        // LOGD("readini: a%sa, %d\n", line, strcmp(line, "#end"));
-        if(line[0] == '#') {
-            if(fgets(line, sizeof(line), file) == nullptr) {
-                break;
-            }
-            trimLineEnd(line);
-            continue;
-        }
-
-        spl = split(line, " ");
-#endif
+    auto processLine = [&](const std::string& sourceLine) {
+        spl = split(sourceLine, " ");
         result_size = spl.size();
         for(size_t i = 0; i < result_size; ++i) {
             LOGD("%lu: %s\n", (unsigned long)i, spl[i].c_str());
@@ -174,7 +110,7 @@ void generateTracerList()
             rightPwm = atof(spl[3].c_str());
 
             // Lコースの場合、左右のPWMを入れ替える
-            if (IS_LEFT_COURSE) {
+            if(IS_LEFT_COURSE) {
                 int tmp = leftPwm;
                 leftPwm = rightPwm;
                 rightPwm = tmp;
@@ -224,7 +160,7 @@ void generateTracerList()
             isLeftEdge = (strcmp(spl[5].c_str(), "LEFT_EDGE") == 0);
 
             // Lコースの場合、エッジを反転させる
-            if (IS_LEFT_COURSE) {
+            if(IS_LEFT_COURSE) {
                 isLeftEdge = !isLeftEdge;
             }
 
@@ -235,8 +171,8 @@ void generateTracerList()
                  targetDistance, targetBrightness, pwm, maxPwm,
                  isLeftEdge ? "LEFT_EDGE" : "RIGHT_EDGE", p, i, d);
             pidGain = new PidGain(p, i, d);
-            gLineTracer
-                = new LineTracer(gLineMonitor, gWalker, targetBrightness, pwm, isLeftEdge, pidGain);
+            gLineTracer = new LineTracer(gLineMonitor, gWalker, targetBrightness, pwm,
+                                         isLeftEdge, pidGain);
             gLineTracer->addStarter(gStarter);
             gLineTracer->addTerminator(gDistanceTerminator);
             if(result_size >= 10) {
@@ -340,16 +276,78 @@ void generateTracerList()
         else {
             // Tracer名にマッチしなかったらなにもしない
         }
+    };
+
 #ifndef MAKE_RASPIKE
+    LOGI("sim\n");
+    // シミュレーター環境でファイルを読み込めないため固定文字列で設定値を読み込む
+    const std::string lines[] = { "ScenarioTracer 100 40 40",
+                                  "LineTracer 6000 20 50 50 LEFT_EDGE 1.3 0 0.013 BLUE",
+                                  "ScenarioTracer 250 70 68",
+                                  "ScenarioTracer 150 68 70",
+                                  "LineTracer 4000 15 50 50 RIGHT_EDGE 0.7 0 0.005 BLUE",
+                                  "ScenarioTracer 450 74 74",
+                                  "ScenarioTracer 100 50 40",
+                                  "LineTracer 4000 15 50 50 LEFT_EDGE 0.9 0 0.005 BLUE",
+                                  "ScenarioTracer 250 44 70",
+                                  "ScenarioTracer 60 75 50 BLACK",
+                                  "LineTracer 4000 15 40 80 RIGHT_EDGE 0.7 0 0.005 BLUE",
+                                  "ScenarioTracer 200 80 68",
+                                  "LineTracer 6000 15 50 80 LEFT_EDGE 0.7 0 0.005 BLUE",
+                                  "#end" };
+    int idx = 0;
+    // strcpy((char*)spl, lines[idx]);
+    while(lines[idx] != "#end") {
+        LOGD("readini: %s\n", lines[idx].c_str());
+        if(lines[idx][0] == '#') {
+            idx++;
+            continue;
+        }
+        processLine(lines[idx]);
         idx++;
+    }
 #else
+    LOGI("notsim\n");
+    char currentDir[512];
+    if(getcwd(currentDir, sizeof(currentDir)) == nullptr) {
+        LOGI("failed to get current directory.\n");
+        return;
+    }
+
+    char iniPath[512];
+    snprintf(iniPath, sizeof(iniPath), "%s/workspace/EtRobocon2026/tracer.ini", currentDir);
+
+    LOGI("tracer.ini読み取り:%s\n", iniPath);
+    FILE* file;
+    file = fopen(iniPath, "r");  // ファイル読み込み
+    if(file == nullptr) {
+        LOGI("failed to open tracer.ini:%s\n", iniPath);
+        return;
+    }
+    char line[512];
+
+    // 1行ずつ値を読み取り使用
     if(fgets(line, sizeof(line), file) == nullptr) {
-        break;
+        LOGI("tracer.ini is empty:%s\n", iniPath);
+        fclose(file);
+        return;
     }
     trimLineEnd(line);
-#endif
+    while(strcmp(line, "#end") != 0) {
+        // LOGD("readini: a%sa, %d\n", line, strcmp(line, "#end"));
+        if(line[0] == '#') {
+            if(fgets(line, sizeof(line), file) == nullptr) {
+                break;
+            }
+            trimLineEnd(line);
+            continue;
+        }
+        processLine(line);
+        if(fgets(line, sizeof(line), file) == nullptr) {
+            break;
+        }
+        trimLineEnd(line);
     }
-#ifdef MAKE_RASPIKE
     fclose(file);  // ファイルを閉じる
 #endif
 
