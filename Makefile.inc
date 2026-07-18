@@ -3,6 +3,10 @@ mkfile_path := $(dir $(lastword $(MAKEFILE_LIST)))
 # Embed the editable tracer.ini into the real-hardware firmware as a C++ string.
 TRACER_CONFIG_HEADER := $(mkfile_path)app/TracerConfig.h
 
+# This rule must not become the default goal when this file is included
+# before the build system's own targets (e.g. `img` in Makefile.workspace).
+TRACER_PREV_DEFAULT_GOAL := $(.DEFAULT_GOAL)
+
 $(TRACER_CONFIG_HEADER): $(mkfile_path)tracer.ini
 	@printf '%s\n' '#ifndef ETTR_APP_TRACERCONFIG_H_' '#define ETTR_APP_TRACERCONFIG_H_' '' 'static const char kTracerIni[] = R"ETROBO(' > $@
 	@cat $< >> $@
@@ -10,7 +14,9 @@ $(TRACER_CONFIG_HEADER): $(mkfile_path)tracer.ini
 
 $(OBJDIR)/app.o: $(TRACER_CONFIG_HEADER)
 
-# ShellƒXƒNƒŠƒvƒg‚ÅAapp,unitƒfƒBƒŒƒNƒgƒŠ’†‚Ìƒ\[ƒXƒR[ƒh–¼‚ðƒIƒuƒWƒFƒNƒgƒtƒ@ƒCƒ‹–¼‚É•ÏŠ·‚µ‚Ä‚¢‚é
+.DEFAULT_GOAL := $(TRACER_PREV_DEFAULT_GOAL)
+
+# Shellï¿½Xï¿½Nï¿½ï¿½ï¿½vï¿½gï¿½ÅAapp,unitï¿½fï¿½Bï¿½ï¿½ï¿½Nï¿½gï¿½ï¿½ï¿½ï¿½ï¿½Ìƒ\ï¿½[ï¿½Xï¿½Rï¿½[ï¿½hï¿½ï¿½ï¿½ï¿½ï¿½Iï¿½uï¿½Wï¿½Fï¿½Nï¿½gï¿½tï¿½@ï¿½Cï¿½ï¿½ï¿½ï¿½ï¿½É•ÏŠï¿½ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½ï¿½
 APPL_CXXOBJS += $(shell ls ${mkfile_path}unit/*.cpp | sed -r 's/.*\/(.*)\.cpp/\1.o/g')
 APPL_CXXOBJS += $(shell ls ${mkfile_path}app/*.cpp | sed -r 's/.*\/(.*)\.cpp/\1.o/g')
 

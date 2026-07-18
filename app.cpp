@@ -9,10 +9,9 @@
 
 #include "app.h"
 #include "kernel_cfg.h"
-#ifdef SPIKERT
-// tracer.ini is converted to this header by Makefile.inc for the firmware build.
+// tracer.ini is converted to this header by Makefile.inc at build time.
+// Both the firmware and the simulator read the scenario from it.
 #include "TracerConfig.h"
-#endif
 #include "Tracer.h"
 #include "LineMonitor.h"
 #include "LineTracer.h"
@@ -113,27 +112,9 @@ void generateTracerList()
     std::vector<std::string> spl;
     size_t result_size;
 
-#ifndef SPIKERT
-    LOGI("sim\n");
-    // シミュレーター環境でファイルを読み込めないため固定文字列で設定値を読み込む
-    const std::string lines[] = { "ArmTracer -30 -120",
-                                  "ArmTracer 30 120",
-                                  "ScenarioTracer 1000 50 50 RED",
-                                  "#end" };
-    int idx = 0;
-    // strcpy((char*)spl, lines[idx]);
-    while(lines[idx] != "#end") {
-        LOGD("readini: %s\n", lines[idx].c_str());
-        if(lines[idx][0] == '#') {
-            idx++;
-            continue;
-        }
-
-        spl = split(lines[idx], " ");
-#else
-    // The hardware firmware cannot read the host workspace at runtime.
-    // Read the tracer.ini content embedded into the firmware during the build instead.
-    LOGI("hardware: embedded tracer.ini\n");
+    // Neither the firmware nor the athrill simulator can read the host
+    // workspace at runtime, so read the tracer.ini content embedded at build time.
+    LOGI("embedded tracer.ini\n");
     std::istringstream configStream(kTracerIni);
     std::string line;
     if(!std::getline(configStream, line)) {
@@ -149,7 +130,6 @@ void generateTracerList()
         }
 
         spl = split(line, " ");
-#endif
         result_size = spl.size();
         for(size_t i = 0; i < result_size; ++i) {
             LOGD("%lu: %s\n", (unsigned long)i, spl[i].c_str());
@@ -256,13 +236,9 @@ void generateTracerList()
         } else if(spl[0] == "ArmTracer") {
             if(result_size < 3) {
                 LOGI("ArmTracer requires 2 params: ArmTracer <pwm> <target_angle_deg>\n");
-#ifndef SPIKERT
-                idx++;
-#else
                 if(!std::getline(configStream, line)) {
                     break;
                 }
-#endif
                 continue;
             }
 
@@ -276,13 +252,9 @@ void generateTracerList()
             if(result_size < 6) {
                 LOGI("UltrasonicAlignTracer requires 5 params: <half_sweep_deg> <turn_pwm> "
                      "<step_deg> <sample_count> <max_distance_mm>\n");
-#ifndef SPIKERT
-                idx++;
-#else
                 if(!std::getline(configStream, line)) {
                     break;
                 }
-#endif
                 continue;
             }
 
@@ -382,13 +354,9 @@ void generateTracerList()
         else {
             // Tracer名にマッチしなかったらなにもしない
         }
-#ifndef SPIKERT
-        idx++;
-#else
     if(!std::getline(configStream, line)) {
         break;
     }
-#endif
     }
 
     tracerListSize = tracerList.size();

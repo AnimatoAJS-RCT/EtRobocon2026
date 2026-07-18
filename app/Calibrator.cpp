@@ -75,7 +75,17 @@ void Calibrator::execUndefined()
         // 初期化処理
         mIsInitialized = true;
     }
+#ifndef SPIKERT
+    // シミュレータ: フォースセンサ/ボタン操作なしで即座に完了させる。
+    // 黒/白はデフォルト値(0/100)のままなので、tracer.ini の目標輝度が
+    // 正規化値のまま使われる。コースはシミュレータ既定の L コースに合わせる。
+    IS_LEFT_COURSE = true;
+    LOGI("[CAL] simulator: skip calibration (course=LEFT, black=%d, white=%d)\n", mBlack,
+         mWhite);
+    mState = TERMINATED;
+#else
     mState = WAITING_FOR_START;
+#endif
 }
 
 void Calibrator::execWaitingForStart()
