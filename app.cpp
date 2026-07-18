@@ -465,16 +465,15 @@ void calibrator_task(intptr_t exinf)
 {
     ER ercd;
     (void)exinf;
-    LOGD("[CAL_TASK] start\n");
-    gCalibrator->run();
-    LOGI("[CAL_TASK] finished calibrator run\n");
 
-    if(!gCalibratorWakeSent && gCalibrator->isFinished()) {
-        gCalibratorWakeSent = true;
-        ercd = wup_tsk(MAIN_TASK);
-        LOGI("[CAL_TASK] wup_tsk(MAIN_TASK)=%d\n", ercd);
-    } else {
-        LOGD("[CAL_TASK] skip wake (already sent or not finished)\n");
+    if(!gCalibratorWakeSent) {
+        gCalibrator->run();
+
+        if(gCalibrator->isFinished()) {
+            gCalibratorWakeSent = true;
+            ercd = wup_tsk(MAIN_TASK);
+            LOGI("[CAL_TASK] wup_tsk(MAIN_TASK)=%d\n", ercd);
+        }
     }
 
     ext_tsk();
