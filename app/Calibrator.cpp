@@ -1,43 +1,44 @@
 #include "Calibrator.h"
-#include "Util.h"
 #include "Log.h"
+
+#include "app.h"
 
 #include "kernel.h"
 
 Calibrator::Calibrator(const spikeapi::ColorSensor& colorSensor,
-                                             const spikeapi::ForceSensor& forceSensor)
-    : mColorSensor(colorSensor), mForceSensor(forceSensor)
+                       const spikeapi::ForceSensor& forceSensor,
+                       spikeapi::Light& light)
+    : mColorSensor(colorSensor), mForceSensor(forceSensor), mLight(light)
 {
 }
 
 void Calibrator::run()
 {
-    while(1) {
-        switch(mState) {
-            case UNDEFINED:
-                execUndefined();
-                break;
-            case WAITING_FOR_START:
-                execWaitingForStart();
-                break;
-            case CALIBRATING_BLACK:
-                execCalibratingBlack();
-                break;
-            case WAITING_FOR_WHITE:
-                execWaitingForWhite();
-                break;
-            case CALIBRATING_WHITE:
-                execCalibratingWhite();
-                break;
-            case WAITING_FOR_FINISH:
-                execWaitingForFinish();
-                break;
-            case TERMINATED:
-                // Do nothing
-                return;
-            default:
-                break;
-        }
+    updateButtonState();
+
+    switch(mState) {
+        case UNDEFINED:
+            execUndefined();
+            break;
+        case WAITING_FOR_START:
+            execWaitingForStart();
+            break;
+        case SETTING_COURSE:
+            execSettingCourse();
+            break;
+        case CALIBRATING_BLACK:
+            execCalibratingBlack();
+            break;
+        case CALIBRATING_WHITE:
+            execCalibratingWhite();
+            break;
+        case WAITING_FOR_START_CONFIRMATION:
+            execWaitingForStartConfirmation();
+            break;
+        case TERMINATED:
+            break;
+        default:
+            break;
     }
 }
 
@@ -61,6 +62,13 @@ bool Calibrator::isFinished()
     return mState == TERMINATED;
 }
 
+// Calibration flow on the hub:
+// 1) ORANGE: press force sensor to start calibration.
+// 2) RED/BLUE: choose course with LEFT/RIGHT arrow, then press CENTER to confirm.
+// 3) LED OFF: place sensor on black and press force sensor.
+// 4) WHITE: place sensor on white and press force sensor.
+// 5) GREEN: confirm the values, then press force sensor to start.
+
 void Calibrator::execUndefined()
 {
     if(mIsInitialized == false) {
@@ -72,73 +80,70 @@ void Calibrator::execUndefined()
 
 void Calibrator::execWaitingForStart()
 {
-    LOGI("Calibrate: Push to start\n");
-    while(!mForceSensor.isTouched()) {
+    mLight.turnOnColor(spikeapi::Light::EColor::ORANGE);
+    if(consumePress()) {
+        LOGI("[CAL] start pressed\n");
+        mState = SETTING_COURSE;
+    }
+}
+
+void Calibrator::execSettingCourse()
+{
+    mLight.turnOnColor(IS_LEFT_COURSE ? spikeapi::Light::EColor::RED
+                                      : spikeapi::Light::EColor::BLUE);
+    if(mButton.isLeftPressed()) {
+        IS_LEFT_COURSE = true;
+        LOGI("[CAL] course: %s\n", IS_LEFT_COURSE ? "LEFT" : "RIGHT");
+    } else if(mButton.isRightPressed()) {
+        IS_LEFT_COURSE = false;
+        LOGI("[CAL] course: %s\n", IS_LEFT_COURSE ? "LEFT" : "RIGHT");
+    } else if(mButton.isCenterPressed()) {
+        LOGI("[CAL] course confirmed: %s\n", IS_LEFT_COURSE ? "LEFT" : "RIGHT");
         mState = CALIBRATING_BLACK;
-        tslp_tsk(500);  // 500ms wait
     }
 }
 
 void Calibrator::execCalibratingBlack()
 {
-    LOGI("Calibrating black...\n");
-    mBlack = mColorSensor.getReflection();
-    LOGI("Black: %d\n", mBlack);
-    tslp_tsk(1000);  // 1s wait
-    mState = WAITING_FOR_WHITE;
-}
-
-void Calibrator::execWaitingForWhite()
-{
-    static int waitLoop = 0;
-    if(waitLoop % 20 == 0) {
-        LOGD("[CAL] WAITING_FOR_WHITE: touched=%d force=%.2f\n",
-             mForceSensor.isTouched() ? 1 : 0, mForceSensor.getForce());
-        LOGI("Set white\n");
-        LOGI("Push to start\n");
-    }
-
-    if(mForceSensor.isTouched()) {
-        LOGI("[CAL] WAITING_FOR_WHITE -> CALIBRATING_WHITE\n");
+    mLight.turnOff();
+    if(consumePress()) {
+        mBlack = mColorSensor.getReflection();
+        LOGI("[CAL] black: %d\n", mBlack);
         mState = CALIBRATING_WHITE;
-        tslp_tsk(500);  // 500ms wait
-        waitLoop = 0;
-        return;
     }
-
-    waitLoop++;
-    tslp_tsk(50);
 }
 
 void Calibrator::execCalibratingWhite()
 {
-    LOGI("Calibrating white...\n");
-    mWhite = mColorSensor.getReflection();
-    LOGI("White: %d\n", mWhite);
-    tslp_tsk(1000);  // 1s wait
-    mState = WAITING_FOR_FINISH;
+    mLight.turnOnColor(spikeapi::Light::EColor::WHITE);
+    if(consumePress()) {
+        mWhite = mColorSensor.getReflection();
+        LOGI("[CAL] white: %d, target: %d\n", mWhite, getTarget());
+        mState = WAITING_FOR_START_CONFIRMATION;
+    }
 }
 
-void Calibrator::execWaitingForFinish()
+void Calibrator::execWaitingForStartConfirmation()
 {
-    static int finishLoop = 0;
-    if(finishLoop == 0) {
-        LOGI("Finished.\n");
-        LOGI("Target: %d\n", getTarget());
-    }
-
-    if(finishLoop % 20 == 0) {
-        LOGD("[CAL] WAITING_FOR_FINISH: touched=%d force=%.2f\n",
-             mForceSensor.isTouched() ? 1 : 0, mForceSensor.getForce());
-    }
-
-    if(mForceSensor.isTouched()) {
-        LOGI("[CAL] WAITING_FOR_FINISH -> TERMINATED\n");
+    mLight.turnOnColor(spikeapi::Light::EColor::GREEN);
+    if(consumePress()) {
+        LOGI("[CAL] calibration confirmed\n");
         mState = TERMINATED;
-        finishLoop = 0;
-        return;
     }
+}
 
-    finishLoop++;
-    tslp_tsk(50);
+void Calibrator::updateButtonState()
+{
+    bool isTouched = mForceSensor.isTouched();
+    if(isTouched && !mWasTouched) {
+        mPressPending = true;
+    }
+    mWasTouched = isTouched;
+}
+
+bool Calibrator::consumePress()
+{
+    bool pressed = mPressPending;
+    mPressPending = false;
+    return pressed;
 }
