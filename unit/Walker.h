@@ -23,8 +23,8 @@ public:
     void stop();
     void brake();
     void setPwm(int leftPwm, int rightPwm);
-    void beginStraightControl();
-    void runStraight(int leftPwm, int rightPwm);
+    void beginEncoderCorrection();
+    void runWithEncoderCorrection(int leftPwm, int rightPwm);
     int getLeftCount();
     int getRightCount();
 

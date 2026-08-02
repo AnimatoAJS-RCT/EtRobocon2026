@@ -50,7 +50,7 @@ void ScenarioTracer::run()
 
 void ScenarioTracer::execWalking()
 {
-    mWalker->runStraight(mLeftPwm, mRightPwm);
+    mWalker->runWithEncoderCorrection(mLeftPwm, mRightPwm);
     for(auto terminator : mTerminatorList) {
         if(terminator->isToBeTerminate()) {
             mWalker->stop();
@@ -65,6 +65,6 @@ void ScenarioTracer::startWalking()
 {
     mStartLeftCount = mWalker->getLeftCount();
     mStartRightCount = mWalker->getRightCount();
-    mWalker->beginStraightControl();
+    mWalker->beginEncoderCorrection();
     mState = WALKING;
 }

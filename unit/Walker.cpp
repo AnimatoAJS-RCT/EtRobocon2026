@@ -67,13 +67,13 @@ void Walker::setPwm(int leftPwm, int rightPwm)
     mRightPwm = rightPwm;
 }
 
-void Walker::beginStraightControl()
+void Walker::beginEncoderCorrection()
 {
     mStraightStartLeftCount = getLeftCount();
     mStraightStartRightCount = getRightCount();
 }
 
-void Walker::runStraight(int leftPwm, int rightPwm)
+void Walker::runWithEncoderCorrection(int leftPwm, int rightPwm)
 {
     const double kp = 0.02;
     const double correctionLimitRatio = 0.2;

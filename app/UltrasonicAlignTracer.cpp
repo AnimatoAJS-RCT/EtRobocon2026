@@ -579,7 +579,7 @@ void UltrasonicAlignTracer::runCreep()
             return;
         }
         mCreepStartForwardWdeg = getForwardWdeg();
-        mWalker->beginStraightControl();
+        mWalker->beginEncoderCorrection();
     }
     if(getForwardWdeg() - mCreepStartForwardWdeg < mCreepTargetWdeg) {
         driveForward(APPROACH_PWM);
@@ -689,7 +689,7 @@ void UltrasonicAlignTracer::startPulse(int distanceMm)
     if(pulseMm > PULSE_MAX_MM) pulseMm = PULSE_MAX_MM;
     mPulseStartForwardWdeg = getForwardWdeg();
     mPulseTargetWdeg = static_cast<int>(pulseMm * WHEEL_DEG_PER_MM);
-    mWalker->beginStraightControl();
+    mWalker->beginEncoderCorrection();
     mPhase = APPROACH_PULSE;
     LOGD("[ULTRA_ALIGN] pulse: %dmm (%d wheelDeg)\n", pulseMm, mPulseTargetWdeg);
 }
@@ -735,7 +735,7 @@ void UltrasonicAlignTracer::startRescan()
     if(backupMm > 0) {
         mBackupStartForwardWdeg = getForwardWdeg();
         mBackupTargetWdeg = static_cast<int>(backupMm * WHEEL_DEG_PER_MM);
-        mWalker->beginStraightControl();
+        mWalker->beginEncoderCorrection();
         mPhase = BACKING;
         LOGI("[ULTRA_ALIGN] backup before rescan: attempt=%d predicted=%dmm backup=%dmm\n",
              mRescanAttempts, predicted, backupMm);
@@ -751,7 +751,7 @@ void UltrasonicAlignTracer::runBackup()
         int leftBoost = 0;
         int rightBoost = 0;
         updateStall(&leftBoost, &rightBoost);
-        mWalker->runStraight(-(APPROACH_PWM + leftBoost), -(APPROACH_PWM + rightBoost));
+        mWalker->runWithEncoderCorrection(-(APPROACH_PWM + leftBoost), -(APPROACH_PWM + rightBoost));
         return;
     }
     mWalker->brake();
@@ -771,7 +771,7 @@ void UltrasonicAlignTracer::startPush(int remainingMm)
 {
     mPushStartForwardWdeg = getForwardWdeg();
     mPushTargetWdeg = mPushWdeg + static_cast<int>(remainingMm * WHEEL_DEG_PER_MM);
-    mWalker->beginStraightControl();
+    mWalker->beginEncoderCorrection();
     mPhase = PUSHING;
     LOGI("[ULTRA_ALIGN] push begin: %d wheelDeg (remaining=%dmm)\n",
          mPushTargetWdeg, remainingMm);
@@ -797,7 +797,7 @@ void UltrasonicAlignTracer::startReturn(bool pushed)
     mWalker->brake();
     mReturnTargetForwardWdeg =
         getForwardWdeg() - static_cast<int>(RETURN_STANDOFF_MM * WHEEL_DEG_PER_MM);
-    mWalker->beginStraightControl();
+    mWalker->beginEncoderCorrection();
     mPhase = RETURNING;
     LOGI("[ULTRA_ALIGN] return begin: found=%d pushed=%d lastDistance=%dmm targetForward=%d\n",
             mFoundObject ? 1 : 0, pushed ? 1 : 0, mLastValidMm, mReturnTargetForwardWdeg);
@@ -806,7 +806,7 @@ void UltrasonicAlignTracer::startReturn(bool pushed)
 void UltrasonicAlignTracer::runReturn()
 {
     if(getForwardWdeg() > mReturnTargetForwardWdeg) {
-        mWalker->runStraight(-RETURN_PWM, -RETURN_PWM);
+        mWalker->runWithEncoderCorrection(-RETURN_PWM, -RETURN_PWM);
         return;
     }
     mWalker->brake();
@@ -848,7 +848,7 @@ void UltrasonicAlignTracer::driveForward(int basePwm)
     int diff = error / 2;
     if(diff > HEADING_DIFF_MAX) diff = HEADING_DIFF_MAX;
     if(diff < -HEADING_DIFF_MAX) diff = -HEADING_DIFF_MAX;
-    mWalker->runStraight(basePwm - diff + leftBoost, basePwm + diff + rightBoost);
+    mWalker->runWithEncoderCorrection(basePwm - diff + leftBoost, basePwm + diff + rightBoost);
 }
 
 void UltrasonicAlignTracer::updateStall(int* leftBoost, int* rightBoost)
