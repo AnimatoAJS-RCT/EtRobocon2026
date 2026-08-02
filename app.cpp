@@ -16,6 +16,7 @@
 #include "LineMonitor.h"
 #include "LineTracer.h"
 #include "ArmTracer.h"
+#include "RotateTracer.h"
 #include "ScenarioTracer.h"
 #include "UltrasonicAlignTracer.h"
 #include "UltrasonicDistanceLoggerTracer.h"
@@ -69,6 +70,7 @@ static LineMonitor* gLineMonitor;
 static Walker* gWalker;
 static LineTracer* gLineTracer;
 static ArmTracer* gArmTracer;
+static RotateTracer* gRotateTracer;
 static ScenarioTracer* gScenarioTracer;
 static UltrasonicAlignTracer* gUltrasonicAlignTracer;
 static UltrasonicDistanceLoggerTracer* gUltrasonicDistanceLoggerTracer;
@@ -91,6 +93,9 @@ static const char* tracerTypeName(const Tracer* tracer)
     }
     if(dynamic_cast<const ArmTracer*>(tracer) != nullptr) {
         return "ArmTracer";
+    }
+    if(dynamic_cast<const RotateTracer*>(tracer) != nullptr) {
+        return "RotateTracer";
     }
     if(dynamic_cast<const UltrasonicAlignTracer*>(tracer) != nullptr) {
         return "UltrasonicAlignTracer";
@@ -253,6 +258,45 @@ void generateTracerList()
             gArmTracer = new ArmTracer(&gArmMotor, armPwm, targetAngle);
             gArmTracer->addStarter(gStarter);
             tracerList.push_back(gArmTracer);
+        } else if(spl[0] == "RotateTracer") {
+            if(result_size != 4) {
+                LOGI("RotateTracer requires 3 params: RotateTracer <TURN_LEFT|TURN_RIGHT> "
+                     "<angle_deg> <pwm>\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            int direction = 0;
+            if(spl[1] == "TURN_RIGHT") {
+                direction = 1;
+            } else if(spl[1] == "TURN_LEFT") {
+                direction = -1;
+            } else {
+                LOGI("RotateTracer direction must be TURN_LEFT or TURN_RIGHT: %s\n",
+                     spl[1].c_str());
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            int angleDeg = atoi(spl[2].c_str());
+            int pwm = atoi(spl[3].c_str());
+            if(angleDeg <= 0 || pwm <= 0 || pwm > 100) {
+                LOGI("RotateTracer requires angle_deg > 0 and 0 < pwm <= 100\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            LOGI("RotateTracer(direction=%s, angle=%ddeg, pwm=%d): push\n",
+                 spl[1].c_str(), angleDeg, pwm);
+            gRotateTracer = new RotateTracer(gWalker, direction, angleDeg, pwm);
+            gRotateTracer->addStarter(gStarter);
+            tracerList.push_back(gRotateTracer);
         } else if(spl[0] == "UltrasonicAlignTracer") {
             if(result_size != 4) {
                 LOGI("UltrasonicAlignTracer requires 3 params: <half_sweep_deg> <max_distance_mm> "
