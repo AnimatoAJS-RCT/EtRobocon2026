@@ -18,6 +18,7 @@
 #include "ArmTracer.h"
 #include "ScenarioTracer.h"
 #include "UltrasonicAlignTracer.h"
+#include "UltrasonicDistanceLoggerTracer.h"
 #include "Walker.h"
 #include "DistanceTerminator.h"
 #include "ColorTerminator.h"
@@ -70,6 +71,7 @@ static LineTracer* gLineTracer;
 static ArmTracer* gArmTracer;
 static ScenarioTracer* gScenarioTracer;
 static UltrasonicAlignTracer* gUltrasonicAlignTracer;
+static UltrasonicDistanceLoggerTracer* gUltrasonicDistanceLoggerTracer;
 static Starter* gStarter;
 static DistanceTerminator* gDistanceTerminator;
 static ColorTerminator* gColorTerminator;
@@ -92,6 +94,9 @@ static const char* tracerTypeName(const Tracer* tracer)
     }
     if(dynamic_cast<const UltrasonicAlignTracer*>(tracer) != nullptr) {
         return "UltrasonicAlignTracer";
+    }
+    if(dynamic_cast<const UltrasonicDistanceLoggerTracer*>(tracer) != nullptr) {
+        return "UltrasonicDistanceLoggerTracer";
     }
 
     return "UnknownTracer";
@@ -249,9 +254,9 @@ void generateTracerList()
             gArmTracer->addStarter(gStarter);
             tracerList.push_back(gArmTracer);
         } else if(spl[0] == "UltrasonicAlignTracer") {
-            if(result_size < 6) {
-                LOGI("UltrasonicAlignTracer requires 5 params: <half_sweep_deg> <turn_pwm> "
-                     "<step_deg> <sample_count> <max_distance_mm>\n");
+            if(result_size != 4) {
+                LOGI("UltrasonicAlignTracer requires 3 params: <half_sweep_deg> <max_distance_mm> "
+                     "<push_distance_mm>\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -259,23 +264,37 @@ void generateTracerList()
             }
 
             int halfSweepAngleDeg = atoi(spl[1].c_str());
-            int turnPwm = atoi(spl[2].c_str());
-            int stepAngleDeg = atoi(spl[3].c_str());
-            int sampleCount = atoi(spl[4].c_str());
-            int maxDistanceMm = atoi(spl[5].c_str());
-            double wheelDegreesPerBodyDegree = result_size >= 7 ? atof(spl[6].c_str()) : 14.0 / 9.0;
-            int centerBandMm = result_size >= 8 ? atoi(spl[7].c_str()) : 15;
+            int maxDistanceMm = atoi(spl[2].c_str());
+            int pushDistanceMm = atoi(spl[3].c_str());
             if(gUltrasonicSensor.hasError()) {
                 LOGI("UltrasonicAlignTracer skipped: ultrasonic sensor is unavailable on PORT_F\n");
             } else {
-                 LOGI("UltrasonicAlignTracer(%ddeg, %d, %ddeg, %d, %dmm, %.2f, %dmm): push\n",
-                     halfSweepAngleDeg, turnPwm, stepAngleDeg, sampleCount, maxDistanceMm,
-                     wheelDegreesPerBodyDegree, centerBandMm);
+                 LOGI("UltrasonicAlignTracer(half=%ddeg, max=%dmm, push=%dmm): push\n",
+                     halfSweepAngleDeg, maxDistanceMm, pushDistanceMm);
                 gUltrasonicAlignTracer = new UltrasonicAlignTracer(
-                    gWalker, &gUltrasonicSensor, halfSweepAngleDeg, turnPwm, stepAngleDeg,
-                    sampleCount, maxDistanceMm, wheelDegreesPerBodyDegree, centerBandMm);
+                    gWalker, &gUltrasonicSensor, halfSweepAngleDeg, maxDistanceMm,
+                    pushDistanceMm);
                 gUltrasonicAlignTracer->addStarter(gStarter);
                 tracerList.push_back(gUltrasonicAlignTracer);
+            }
+        } else if(spl[0] == "UltrasonicDistanceLoggerTracer") {
+            if(result_size != 2) {
+                LOGI("UltrasonicDistanceLoggerTracer requires 1 param: <sample_count>\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            int sampleCount = atoi(spl[1].c_str());
+            if(gUltrasonicSensor.hasError()) {
+                LOGI("UltrasonicDistanceLoggerTracer skipped: ultrasonic sensor is unavailable on PORT_F\n");
+            } else {
+                LOGI("UltrasonicDistanceLoggerTracer(samples=%d): push\n", sampleCount);
+                gUltrasonicDistanceLoggerTracer = new UltrasonicDistanceLoggerTracer(
+                    gWalker, &gUltrasonicSensor, sampleCount);
+                gUltrasonicDistanceLoggerTracer->addStarter(gStarter);
+                tracerList.push_back(gUltrasonicDistanceLoggerTracer);
             }
         }
         // TODO:難所トレーサーの実装
