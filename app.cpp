@@ -20,6 +20,7 @@
 #include "ScenarioTracer.h"
 #include "UltrasonicAlignTracer.h"
 #include "UltrasonicDistanceLoggerTracer.h"
+#include "UltrasonicProbeTracer.h"
 #include "Walker.h"
 #include "DistanceTerminator.h"
 #include "ColorTerminator.h"
@@ -74,6 +75,7 @@ static RotateTracer* gRotateTracer;
 static ScenarioTracer* gScenarioTracer;
 static UltrasonicAlignTracer* gUltrasonicAlignTracer;
 static UltrasonicDistanceLoggerTracer* gUltrasonicDistanceLoggerTracer;
+static UltrasonicProbeTracer* gUltrasonicProbeTracer;
 static Starter* gStarter;
 static DistanceTerminator* gDistanceTerminator;
 static ColorTerminator* gColorTerminator;
@@ -102,6 +104,9 @@ static const char* tracerTypeName(const Tracer* tracer)
     }
     if(dynamic_cast<const UltrasonicDistanceLoggerTracer*>(tracer) != nullptr) {
         return "UltrasonicDistanceLoggerTracer";
+    }
+    if(dynamic_cast<const UltrasonicProbeTracer*>(tracer) != nullptr) {
+        return "UltrasonicProbeTracer";
     }
 
     return "UnknownTracer";
@@ -339,6 +344,33 @@ void generateTracerList()
                     gWalker, &gUltrasonicSensor, sampleCount);
                 gUltrasonicDistanceLoggerTracer->addStarter(gStarter);
                 tracerList.push_back(gUltrasonicDistanceLoggerTracer);
+            }
+        } else if(spl[0] == "UltrasonicProbeTracer") {
+            if(result_size != 3 && result_size != 4) {
+                LOGI("UltrasonicProbeTracer requires: <DISTL|DISTS|TRAW|ADRAW|ALL> "
+                     "<sample_count> [sample_interval_ms]\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            const std::string& modeName = spl[1];
+            int sampleCount = atoi(spl[2].c_str());
+            int sampleIntervalMs = result_size == 4 ? atoi(spl[3].c_str()) : 100;
+            if(!UltrasonicProbeTracer::isSupportedMode(modeName) || sampleCount <= 0
+               || sampleIntervalMs <= 0) {
+                LOGI("UltrasonicProbeTracer requires a supported mode, sample_count > 0, and "
+                     "sample_interval_ms > 0\n");
+            } else if(gUltrasonicSensor.hasError()) {
+                LOGI("UltrasonicProbeTracer skipped: ultrasonic sensor is unavailable on PORT_F\n");
+            } else {
+                LOGI("UltrasonicProbeTracer(mode=%s, samples=%d, interval=%dms): push\n",
+                     modeName.c_str(), sampleCount, sampleIntervalMs);
+                gUltrasonicProbeTracer = new UltrasonicProbeTracer(
+                    gWalker, modeName, sampleCount, sampleIntervalMs);
+                gUltrasonicProbeTracer->addStarter(gStarter);
+                tracerList.push_back(gUltrasonicProbeTracer);
             }
         }
         // TODO:難所トレーサーの実装
