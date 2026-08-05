@@ -45,8 +45,13 @@ UltrasonicProbeTracer::UltrasonicProbeTracer(Walker* walker, const std::string& 
 
 bool UltrasonicProbeTracer::isSupportedMode(const std::string& modeName)
 {
+#ifdef SPIKERT
     return modeName == "DISTL" || modeName == "DISTS" || modeName == "TRAW"
            || modeName == "ADRAW" || modeName == "ALL";
+#else
+    (void)modeName;
+    return false;
+#endif
 }
 
 void UltrasonicProbeTracer::run()
@@ -123,6 +128,7 @@ void UltrasonicProbeTracer::startSample()
 
 void UltrasonicProbeTracer::beginMode()
 {
+#ifdef SPIKERT
     ProbeMode desiredMode = mModes[mModeIndex];
     if(mHasActiveMode && desiredMode == mActiveMode) {
         mReadState = LOG_VALUE;
@@ -135,21 +141,30 @@ void UltrasonicProbeTracer::beginMode()
     mHasActiveMode = true;
     mStaleWaitCycles = 0;
     mReadState = WAIT_STALE;
+#else
+    mReadState = LOG_VALUE;
+#endif
 }
 
 void UltrasonicProbeTracer::readAndDiscard()
 {
+#ifdef SPIKERT
     int32_t ignoredValue = 0;
     pup_device_get_values(mDevice, modeToPbio(mModes[mModeIndex]), &ignoredValue);
+#endif
 }
 
 void UltrasonicProbeTracer::logValue()
 {
+#ifdef SPIKERT
     int32_t value = 0;
     pbio_error_t error = pup_device_get_values(mDevice, modeToPbio(mModes[mModeIndex]), &value);
     LOGI("[ULTRA_PROBE]\t%d\t%s\t%d\t%ld\t%d\n", mLoggedSampleCount + 1,
          modeToName(mModes[mModeIndex]), static_cast<int>(error), static_cast<long>(value),
          mElapsedMs);
+#else
+    LOGI("[ULTRA_PROBE] unavailable in simulator\n");
+#endif
 }
 
 void UltrasonicProbeTracer::advanceMode()
@@ -170,6 +185,7 @@ void UltrasonicProbeTracer::advanceMode()
 
 int UltrasonicProbeTracer::modeToPbio(ProbeMode mode) const
 {
+#ifdef SPIKERT
     switch(mode) {
         case DISTL:
             return PBIO_IODEV_MODE_PUP_ULTRASONIC_SENSOR__DISTL;
@@ -181,6 +197,10 @@ int UltrasonicProbeTracer::modeToPbio(ProbeMode mode) const
             return PBIO_IODEV_MODE_PUP_ULTRASONIC_SENSOR__ADRAW;
     }
     return PBIO_IODEV_MODE_PUP_ULTRASONIC_SENSOR__DISTL;
+#else
+    (void)mode;
+    return 0;
+#endif
 }
 
 const char* UltrasonicProbeTracer::modeToName(ProbeMode mode) const
