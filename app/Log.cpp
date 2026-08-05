@@ -3,29 +3,39 @@
 #include "kernel_cfg.h"
 
 #include <kernel.h>
+#ifdef SPIKERT
 #include <syssvc/serial.h>
 #include <serial/serial.h>
+#endif
 
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
+#ifdef SPIKERT
 static const uint_t BT_TX_QUEUE_LENGTH = 64U;
 static const uint_t BT_TX_MESSAGE_SIZE = 512U;
+#endif
 
 static bool gBluetoothModeEnabled = false;
 #ifdef ETROBO_PHYSICAL_BUILD
 static bool gBluetoothPortOpened = false;
 #endif
+#ifdef SPIKERT
 static char gBluetoothTxQueue[BT_TX_QUEUE_LENGTH][BT_TX_MESSAGE_SIZE];
 static uint_t gBluetoothTxHead = 0U;
 static uint_t gBluetoothTxTail = 0U;
 static uint_t gBluetoothTxCount = 0U;
 static uint_t gBluetoothTxDroppedCount = 0U;
+#endif
 
 void ettr_log_set_bluetooth_mode(bool enabled)
 {
+#ifdef SPIKERT
     gBluetoothModeEnabled = enabled;
+#else
+    (void)enabled;
+#endif
 }
 
 bool ettr_log_wait_for_bluetooth(void)
@@ -43,6 +53,7 @@ bool ettr_log_wait_for_bluetooth(void)
     return gBluetoothModeEnabled;
 }
 
+#ifdef SPIKERT
 static void ettr_log_write_bt(const char* text)
 {
     size_t length = strlen(text);
@@ -104,9 +115,11 @@ extern "C" void sender_task(intptr_t exinf)
         unl_cpu();
     }
 }
+#endif
 
 void ettr_log_write_v(const char* fmt, va_list ap)
 {
+#ifdef SPIKERT
     char buffer[512];
     int written = vsnprintf(buffer, sizeof(buffer), fmt, ap);
 
@@ -120,6 +133,9 @@ void ettr_log_write_v(const char* fmt, va_list ap)
     }
 
     fputs(buffer, stdout);
+#else
+    vfprintf(stdout, fmt, ap);
+#endif
 }
 
 void ettr_log_write(const char* fmt, ...)
