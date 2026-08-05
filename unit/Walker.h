@@ -23,6 +23,8 @@ public:
     void stop();
     void brake();
     void setPwm(int leftPwm, int rightPwm);
+    void beginEncoderCorrection();
+    void runWithEncoderCorrection(int leftPwm, int rightPwm);
     int getLeftCount();
     int getRightCount();
 
@@ -31,6 +33,8 @@ private:
     spikeapi::Motor& mRightWheel;
     int mLeftPwm;
     int mRightPwm;
+    int mStraightStartLeftCount;
+    int mStraightStartRightCount;
 };
 
 #endif  // ETTR_UNIT_WALKER_H_

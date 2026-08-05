@@ -8,6 +8,8 @@
  *****************************************************************************/
 
 #include "Walker.h"
+#include <algorithm>
+#include <cmath>
 #include <stdio.h>
 
 /**
@@ -17,6 +19,7 @@
  */
 Walker::Walker(spikeapi::Motor& leftWheel, spikeapi::Motor& rightWheel)
   : mLeftWheel(leftWheel), mRightWheel(rightWheel), mLeftPwm(0), mRightPwm(0)
+    , mStraightStartLeftCount(0), mStraightStartRightCount(0)
 {
 }
 
@@ -62,6 +65,42 @@ void Walker::setPwm(int leftPwm, int rightPwm)
 {
     mLeftPwm = leftPwm;
     mRightPwm = rightPwm;
+}
+
+void Walker::beginEncoderCorrection()
+{
+    mStraightStartLeftCount = getLeftCount();
+    mStraightStartRightCount = getRightCount();
+}
+
+void Walker::runWithEncoderCorrection(int leftPwm, int rightPwm)
+{
+    const double kp = 0.02;
+    const double correctionLimitRatio = 0.2;
+    int leftCount = getLeftCount() - mStraightStartLeftCount;
+    int rightCount = getRightCount() - mStraightStartRightCount;
+    double error = static_cast<double>(leftCount) * rightPwm
+                   - static_cast<double>(rightCount) * leftPwm;
+    int correction = static_cast<int>(kp * error);
+
+    int correctedLeftPwm;
+    int correctedRightPwm;
+    if(leftPwm + rightPwm >= 0) {
+        correctedLeftPwm = leftPwm - correction;
+        correctedRightPwm = rightPwm + correction;
+    } else {
+        correctedLeftPwm = leftPwm + correction;
+        correctedRightPwm = rightPwm - correction;
+    }
+
+    int leftMargin = static_cast<int>(std::abs(leftPwm) * correctionLimitRatio);
+    int rightMargin = static_cast<int>(std::abs(rightPwm) * correctionLimitRatio);
+    correctedLeftPwm = std::max(leftPwm - leftMargin,
+                                std::min(correctedLeftPwm, leftPwm + leftMargin));
+    correctedRightPwm = std::max(rightPwm - rightMargin,
+                                 std::min(correctedRightPwm, rightPwm + rightMargin));
+    setPwm(correctedLeftPwm, correctedRightPwm);
+    run();
 }
 
 /**
