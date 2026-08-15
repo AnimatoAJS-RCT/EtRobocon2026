@@ -21,6 +21,8 @@
 #include "UltrasonicAlignTracer.h"
 #include "UltrasonicDistanceLoggerTracer.h"
 #include "UltrasonicProbeTracer.h"
+#include "RallyRouteSolver.h"
+#include "RallyTracer.h"
 #include "Walker.h"
 #include "DistanceTerminator.h"
 #include "ColorTerminator.h"
@@ -76,6 +78,7 @@ static ScenarioTracer* gScenarioTracer;
 static UltrasonicAlignTracer* gUltrasonicAlignTracer;
 static UltrasonicDistanceLoggerTracer* gUltrasonicDistanceLoggerTracer;
 static UltrasonicProbeTracer* gUltrasonicProbeTracer;
+static RallyTracer* gRallyTracer;
 static Starter* gStarter;
 static DistanceTerminator* gDistanceTerminator;
 static ColorTerminator* gColorTerminator;
@@ -107,6 +110,9 @@ static const char* tracerTypeName(const Tracer* tracer)
     }
     if(dynamic_cast<const UltrasonicProbeTracer*>(tracer) != nullptr) {
         return "UltrasonicProbeTracer";
+    }
+    if(dynamic_cast<const RallyTracer*>(tracer) != nullptr) {
+        return "RallyTracer";
     }
 
     return "UnknownTracer";
@@ -326,6 +332,77 @@ void generateTracerList()
                 gUltrasonicAlignTracer->addStarter(gStarter);
                 tracerList.push_back(gUltrasonicAlignTracer);
             }
+        } else if(spl[0] == "RallyTracer") {
+            if(result_size < 19) {
+                LOGI("RallyTracer requires 18 params: <move_pwm> <turn_pwm> <start_x> <start_y> "
+                     "<start_heading_deg> <lap_count> "
+                     "<red_gx1> <red_gy1> <red_gx2> <red_gy2> "
+                     "<blue_gx1> <blue_gy1> <blue_gx2> <blue_gy2> "
+                     "<yellow_gx1> <yellow_gy1> <yellow_gx2> <yellow_gy2>\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            int movePwm = atoi(spl[1].c_str());
+            int turnPwm = atoi(spl[2].c_str());
+            QRPos startPos = {atoi(spl[3].c_str()), atoi(spl[4].c_str())};
+            int startHeadingDeg = atoi(spl[5].c_str());
+            int lapCount = atoi(spl[6].c_str());
+
+            GateInfo gates;
+            gates.red.gx1 = atoi(spl[7].c_str());
+            gates.red.gy1 = atoi(spl[8].c_str());
+            gates.red.gx2 = atoi(spl[9].c_str());
+            gates.red.gy2 = atoi(spl[10].c_str());
+            gates.blue.gx1 = atoi(spl[11].c_str());
+            gates.blue.gy1 = atoi(spl[12].c_str());
+            gates.blue.gx2 = atoi(spl[13].c_str());
+            gates.blue.gy2 = atoi(spl[14].c_str());
+            gates.yellow.gx1 = atoi(spl[15].c_str());
+            gates.yellow.gy1 = atoi(spl[16].c_str());
+            gates.yellow.gx2 = atoi(spl[17].c_str());
+            gates.yellow.gy2 = atoi(spl[18].c_str());
+
+            if(IS_LEFT_COURSE) {
+                auto mirrorQrX = [](int x) { return 5 - x; };
+                auto mirrorGateX = [](int gx) { return 6 - gx; };
+                auto mirrorHeading = [](int heading) {
+                    int normalized = ((heading % 360) + 360) % 360;
+                    return (180 - normalized + 360) % 360;
+                };
+
+                startPos.x = mirrorQrX(startPos.x);
+                startHeadingDeg = mirrorHeading(startHeadingDeg);
+
+                gates.red.gx1 = mirrorGateX(gates.red.gx1);
+                gates.red.gx2 = mirrorGateX(gates.red.gx2);
+                gates.blue.gx1 = mirrorGateX(gates.blue.gx1);
+                gates.blue.gx2 = mirrorGateX(gates.blue.gx2);
+                gates.yellow.gx1 = mirrorGateX(gates.yellow.gx1);
+                gates.yellow.gx2 = mirrorGateX(gates.yellow.gx2);
+
+                LOGI("RallyTracer mirrored for L-course: start=(%d,%d) heading=%d\n",
+                     startPos.x, startPos.y, startHeadingDeg);
+            }
+
+            RallyRouteSolver::Config cfg;
+            cfg.startPos = startPos;
+            cfg.lapCount = lapCount;
+            RallyRoute route = RallyRouteSolver::solve(gates, cfg);
+
+            LOGI("RallyTracer(move=%d turn=%d start=(%d,%d) heading=%d lap=%d "
+                 "R=(%d,%d)-(%d,%d) B=(%d,%d)-(%d,%d) Y=(%d,%d)-(%d,%d)): push\n",
+                 movePwm, turnPwm, startPos.x, startPos.y, startHeadingDeg, lapCount,
+                 gates.red.gx1, gates.red.gy1, gates.red.gx2, gates.red.gy2,
+                 gates.blue.gx1, gates.blue.gy1, gates.blue.gx2, gates.blue.gy2,
+                 gates.yellow.gx1, gates.yellow.gy1, gates.yellow.gx2, gates.yellow.gy2);
+
+            gRallyTracer = new RallyTracer(gWalker, route, movePwm, turnPwm, startPos,
+                                           startHeadingDeg);
+            gRallyTracer->addStarter(gStarter);
+            tracerList.push_back(gRallyTracer);
         } else if(spl[0] == "UltrasonicDistanceLoggerTracer") {
             if(result_size != 2) {
                 LOGI("UltrasonicDistanceLoggerTracer requires 1 param: <sample_count>\n");
