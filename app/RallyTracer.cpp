@@ -17,7 +17,12 @@
 
 RallyTracer::RallyTracer(Walker* walker, const RallyRoute& route,
                          int movePwm, int turnPwm,
-                         QRPos initialPos, int initialHeadingDeg)
+                                                 QRPos initialPos, int initialHeadingDeg,
+                                                 const spikeapi::ColorSensor* colorSensor,
+                                                 bool enableMarkerCorrection,
+                                                 int markerReflectionThreshold,
+                                                 int markerSnapWindowDegrees,
+                                                 int markerCooldownTicks)
     : mWalker(walker),
       mRoute(route),
       mMovePwm(std::max(1, std::abs(movePwm))),
@@ -29,7 +34,14 @@ RallyTracer::RallyTracer(Walker* walker, const RallyRoute& route,
       mTargetHeadingDeg(0),
       mPhaseStartLeftCount(0),
       mPhaseStartRightCount(0),
-      mTargetWheelDegrees(0)
+      mTargetWheelDegrees(0),
+      mColorSensor(colorSensor),
+      mEnableMarkerCorrection(enableMarkerCorrection),
+      mMarkerReflectionThreshold(markerReflectionThreshold),
+      mMarkerSnapWindowDegrees(std::max(1, markerSnapWindowDegrees)),
+      mMarkerCooldownTicks(std::max(0, markerCooldownTicks)),
+      mMarkerCooldownRemaining(0),
+      mMarkerDetectedInPhase(false)
 {
     mState = UNDEFINED;
 }
@@ -125,7 +137,9 @@ void RallyTracer::beginMoving(int wheelDegrees)
 {
     mTargetWheelDegrees = wheelDegrees;
     resetPhaseCounters();
+    mWalker->beginEncoderCorrection();
     mPhase = MOVING;
+    mMarkerDetectedInPhase = false;
     LOGD("[RALLY] begin moving: wheelDeg=%d\n", wheelDegrees);
 }
 
@@ -133,7 +147,9 @@ void RallyTracer::beginReturning(int wheelDegrees)
 {
     mTargetWheelDegrees = wheelDegrees;
     resetPhaseCounters();
+    mWalker->beginEncoderCorrection();
     mPhase = RETURNING;
+    mMarkerDetectedInPhase = false;
     LOGD("[RALLY] begin returning: wheelDeg=%d\n", wheelDegrees);
 }
 
@@ -189,7 +205,7 @@ void RallyTracer::execMoving()
     int current   = getMoveWheelDegrees();
     int remaining = mTargetWheelDegrees - current;
 
-    if(remaining <= MOVE_TOLERANCE) {
+    if(remaining <= MOVE_TOLERANCE || isMarkerSnapTriggered(remaining)) {
         mWalker->brake();
         const RouteStep& step = mRoute[mCurrentStepIndex];
         if(step.type == RouteStepType::VIRTUAL_DETOUR) {
@@ -201,8 +217,7 @@ void RallyTracer::execMoving()
         return;
     }
 
-    mWalker->setPwm(mMovePwm, mMovePwm);
-    mWalker->run();
+    mWalker->runWithEncoderCorrection(mMovePwm, mMovePwm);
 }
 
 void RallyTracer::execReturning()
@@ -211,14 +226,13 @@ void RallyTracer::execReturning()
     int traveled  = -getMoveWheelDegrees();
     int remaining = mTargetWheelDegrees - traveled;
 
-    if(remaining <= MOVE_TOLERANCE) {
+    if(remaining <= MOVE_TOLERANCE || isMarkerSnapTriggered(remaining)) {
         mWalker->brake();
         finishStep();
         return;
     }
 
-    mWalker->setPwm(-mMovePwm, -mMovePwm);
-    mWalker->run();
+    mWalker->runWithEncoderCorrection(-mMovePwm, -mMovePwm);
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +257,34 @@ void RallyTracer::resetPhaseCounters()
 {
     mPhaseStartLeftCount  = mWalker->getLeftCount();
     mPhaseStartRightCount = mWalker->getRightCount();
+}
+
+bool RallyTracer::isMarkerSnapTriggered(int remainingDegrees)
+{
+    if(!mEnableMarkerCorrection || mColorSensor == nullptr) {
+        return false;
+    }
+    if(mMarkerDetectedInPhase) {
+        return false;
+    }
+    if(remainingDegrees > mMarkerSnapWindowDegrees) {
+        return false;
+    }
+    if(mMarkerCooldownRemaining > 0) {
+        mMarkerCooldownRemaining--;
+        return false;
+    }
+
+    int reflection = mColorSensor->getReflection();
+    if(reflection > mMarkerReflectionThreshold) {
+        return false;
+    }
+
+    mMarkerDetectedInPhase = true;
+    mMarkerCooldownRemaining = mMarkerCooldownTicks;
+    LOGI("[RALLY] marker snap: reflection=%d remain=%d window=%d\n",
+         reflection, remainingDegrees, mMarkerSnapWindowDegrees);
+    return true;
 }
 
 // static

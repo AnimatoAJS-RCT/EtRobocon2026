@@ -338,7 +338,9 @@ void generateTracerList()
                      "<start_heading_deg> <lap_count> "
                      "<red_gx1> <red_gy1> <red_gx2> <red_gy2> "
                      "<blue_gx1> <blue_gy1> <blue_gx2> <blue_gy2> "
-                     "<yellow_gx1> <yellow_gy1> <yellow_gx2> <yellow_gy2>\n");
+                     "<yellow_gx1> <yellow_gy1> <yellow_gx2> <yellow_gy2> "
+                     "[marker_enable] [marker_reflection_threshold] "
+                     "[marker_snap_window_deg] [marker_cooldown_ticks]\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -364,6 +366,11 @@ void generateTracerList()
             gates.yellow.gy1 = atoi(spl[16].c_str());
             gates.yellow.gx2 = atoi(spl[17].c_str());
             gates.yellow.gy2 = atoi(spl[18].c_str());
+
+            bool enableMarkerCorrection = result_size >= 20 ? (atoi(spl[19].c_str()) != 0) : false;
+            int markerReflectionThreshold = result_size >= 21 ? atoi(spl[20].c_str()) : 20;
+            int markerSnapWindowDeg = result_size >= 22 ? atoi(spl[21].c_str()) : 180;
+            int markerCooldownTicks = result_size >= 23 ? atoi(spl[22].c_str()) : 25;
 
             if(IS_LEFT_COURSE) {
                 auto mirrorQrX = [](int x) { return 5 - x; };
@@ -392,15 +399,22 @@ void generateTracerList()
             cfg.lapCount = lapCount;
             RallyRoute route = RallyRouteSolver::solve(gates, cfg);
 
-            LOGI("RallyTracer(move=%d turn=%d start=(%d,%d) heading=%d lap=%d "
-                 "R=(%d,%d)-(%d,%d) B=(%d,%d)-(%d,%d) Y=(%d,%d)-(%d,%d)): push\n",
+              LOGI("RallyTracer(move=%d turn=%d start=(%d,%d) heading=%d lap=%d "
+                  "R=(%d,%d)-(%d,%d) B=(%d,%d)-(%d,%d) Y=(%d,%d)-(%d,%d) "
+                  "marker=%d thr=%d snap=%d cd=%d): push\n",
                  movePwm, turnPwm, startPos.x, startPos.y, startHeadingDeg, lapCount,
                  gates.red.gx1, gates.red.gy1, gates.red.gx2, gates.red.gy2,
                  gates.blue.gx1, gates.blue.gy1, gates.blue.gx2, gates.blue.gy2,
-                 gates.yellow.gx1, gates.yellow.gy1, gates.yellow.gx2, gates.yellow.gy2);
+                  gates.yellow.gx1, gates.yellow.gy1, gates.yellow.gx2, gates.yellow.gy2,
+                  enableMarkerCorrection ? 1 : 0, markerReflectionThreshold,
+                  markerSnapWindowDeg, markerCooldownTicks);
 
             gRallyTracer = new RallyTracer(gWalker, route, movePwm, turnPwm, startPos,
-                                           startHeadingDeg);
+                                       startHeadingDeg, &gColorSensor,
+                                       enableMarkerCorrection,
+                                       markerReflectionThreshold,
+                                       markerSnapWindowDeg,
+                                       markerCooldownTicks);
             gRallyTracer->addStarter(gStarter);
             tracerList.push_back(gRallyTracer);
         } else if(spl[0] == "UltrasonicDistanceLoggerTracer") {

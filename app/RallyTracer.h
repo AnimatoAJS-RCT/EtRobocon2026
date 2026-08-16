@@ -13,6 +13,7 @@
 #define ETTR_APP_RALLYTRACER_H_
 
 #include "RallyRoute.h"
+#include "ColorSensor.h"
 #include "Tracer.h"
 #include "Walker.h"
 
@@ -27,11 +28,21 @@ public:
      * @param turnPwm           旋回時の PWM 値 (正値)
      * @param initialPos        走行開始時の QR 座標
      * @param initialHeadingDeg 走行開始時の機体向き (0=東, 90=北, 180=西, 270=南)
+      * @param colorSensor       床面マーカ検出用センサ（未使用時は nullptr）
+      * @param enableMarkerCorrection 黒マーカ検出で自己位置補正を有効化するか
+      * @param markerReflectionThreshold 黒マーカ判定の反射光しきい値（以下で検出）
+      * @param markerSnapWindowDegrees 目標残距離がこの値以下のときだけ補正を許可
+      * @param markerCooldownTicks 連続誤検出を防ぐクールダウン周期数
      */
     RallyTracer(Walker* walker, const RallyRoute& route,
                 int movePwm, int turnPwm,
                 QRPos initialPos = {1, 1},
-                int initialHeadingDeg = 0);
+                     int initialHeadingDeg = 0,
+                     const spikeapi::ColorSensor* colorSensor = nullptr,
+                     bool enableMarkerCorrection = false,
+                     int markerReflectionThreshold = 20,
+                     int markerSnapWindowDegrees = 180,
+                     int markerCooldownTicks = 25);
 
     void run() override;
 
@@ -73,6 +84,14 @@ private:
     int mPhaseStartRightCount;      ///< 現フェーズ開始時の右モーター値
     int mTargetWheelDegrees;        ///< 現フェーズの目標ホイール変化量（絶対値）
 
+    const spikeapi::ColorSensor* mColorSensor;
+    bool mEnableMarkerCorrection;
+    int mMarkerReflectionThreshold;
+    int mMarkerSnapWindowDegrees;
+    int mMarkerCooldownTicks;
+    int mMarkerCooldownRemaining;
+    bool mMarkerDetectedInPhase;
+
     // ---- フェーズ遷移 ----
     void startNextStep();
     void beginTurning(int targetHeadingDeg);
@@ -84,6 +103,8 @@ private:
     void execTurning();
     void execMoving();
     void execReturning();
+
+    bool isMarkerSnapTriggered(int remainingDegrees);
 
     // ---- ユーティリティ ----
     /// 旋回量を計測 [ホイール度、反時計回りが正]
