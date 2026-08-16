@@ -27,11 +27,13 @@ public:
      * @param turnPwm           旋回時の PWM 値 (正値)
      * @param initialPos        走行開始時の QR 座標
      * @param initialHeadingDeg 走行開始時の機体向き (0=東, 90=北, 180=西, 270=南)
+    * @param finalHeadingDeg   終了時の機体向き。負値の場合は最終旋回を行わない
      */
     RallyTracer(Walker* walker, const RallyRoute& route,
                 int movePwm, int turnPwm,
                 QRPos initialPos = {1, 1},
-                int initialHeadingDeg = 0);
+             int initialHeadingDeg = 0,
+             int finalHeadingDeg = -1);
 
     void run() override;
 
@@ -39,14 +41,14 @@ public:
 
     /// QR コード格子 1 マス分の移動に必要なホイール回転角 [度]
     /// QR 間隔 200 mm, ホイール径 56 mm として計算: 200 / (56π) × 360 ≈ 410
-    static const int QR_GRID_WHEEL_DEGREES = 410;
+    static const int QR_GRID_WHEEL_DEGREES = 510;
 
     /// 車体 1 度旋回に必要なホイール回転角（右輪-左輪の平均変化量）
     /// UltrasonicAlignTracer と同じ 14/9 ≈ 1.556 を使用
-    static constexpr double WHEEL_DEGREES_PER_BODY_DEGREE = 14.0 / 9.0;
+    static constexpr double WHEEL_DEGREES_PER_BODY_DEGREE = 2.115;
 
     /// 旋回完了の許容誤差 [ホイール度]
-    static const int TURN_TOLERANCE = 3;
+    static const int TURN_TOLERANCE = 1;
 
     /// 直進完了の許容誤差 [ホイール度]
     static const int MOVE_TOLERANCE = 10;
@@ -68,6 +70,8 @@ private:
     QRPos mCurrentPos;              ///< 現在の QR 座標
     int mHeadingDeg;                ///< 現在の機体向き [度]
     int mTargetHeadingDeg;          ///< 旋回目標の向き（旋回完了時に mHeadingDeg へコピー）
+    int mFinalHeadingDeg;           ///< 終了時の機体向き。負値なら指定なし
+    bool mIsFinalTurning;           ///< 最終方位合わせ中かどうか
 
     int mPhaseStartLeftCount;       ///< 現フェーズ開始時の左モーター値
     int mPhaseStartRightCount;      ///< 現フェーズ開始時の右モーター値

@@ -71,6 +71,16 @@ RallyRoute RallyRouteSolver::solve(const GateInfo& gates, const Config& config)
         }
     }
 
+    if(config.hasFinalPos && currentPos != config.finalPos) {
+        std::vector<QRPos> path = findPath(currentPos, config.finalPos);
+        for(int i = 1; i < static_cast<int>(path.size()); i++) {
+            route.addStep(RouteStep::move(path[i]));
+        }
+        LOGI("[SOLVER] final: destination=(%d,%d) totalSteps=%u\n",
+             config.finalPos.x, config.finalPos.y,
+             static_cast<unsigned>(route.size()));
+    }
+
     return route;
 }
 

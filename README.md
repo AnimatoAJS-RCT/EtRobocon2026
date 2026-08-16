@@ -95,9 +95,20 @@ ETラリーは、経路生成と走行制御を分離して設計しています
 
 ### tracer.ini 設定
 
-RallyTracer の指定形式は以下です。
+`RallyTracer` は従来どおりゲート位置から `RallyRouteSolver` で経路を生成します。
 
-RallyTracer movePwm turnPwm startX startY startHeading lapCount red_gx1 red_gy1 red_gx2 red_gy2 blue_gx1 blue_gy1 blue_gx2 blue_gy2 yellow_gx1 yellow_gy1 yellow_gx2 yellow_gy2
+RallyTracer movePwm turnPwm startX startY startHeading lapCount red_gx1 red_gy1 red_gx2 red_gy2 blue_gx1 blue_gy1 blue_gx2 blue_gy2 yellow_gx1 yellow_gy1 yellow_gx2 yellow_gy2 [endX endY endHeading]
+
+`endX endY endHeading` を指定すると、ソルバー経路の終了後にその QR 座標まで移動し、指定方位へ旋回して停止します。
+
+指定した経路をそのまま走らせる場合は、`RallyRouteTracer` を使用します。開始位置の後に、走行先 QR 座標を順に並べます。
+
+RallyRouteTracer movePwm turnPwm startX startY startHeading routeX1 routeY1 [routeX2 routeY2 ...] [endX endY endHeading]
+
+`endX endY endHeading` を指定すると、座標列の終了後にその QR 座標まで移動し、指定方位へ旋回して停止します。
+
+- 実在する QR 座標は `1..4` です。
+- 外周ゲートを通過する場合は、外周側の座標 `0` または `5` を指定します。走行体は通過後、直前の実在 QR 座標へ後退して戻ります。
 
 startHeading は次の方位角定義を使います。
 

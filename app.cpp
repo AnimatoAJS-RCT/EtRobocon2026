@@ -333,12 +333,13 @@ void generateTracerList()
                 tracerList.push_back(gUltrasonicAlignTracer);
             }
         } else if(spl[0] == "RallyTracer") {
-            if(result_size < 19) {
+            if(result_size != 19 && result_size != 22) {
                 LOGI("RallyTracer requires 18 params: <move_pwm> <turn_pwm> <start_x> <start_y> "
                      "<start_heading_deg> <lap_count> "
                      "<red_gx1> <red_gy1> <red_gx2> <red_gy2> "
                      "<blue_gx1> <blue_gy1> <blue_gx2> <blue_gy2> "
-                     "<yellow_gx1> <yellow_gy1> <yellow_gx2> <yellow_gy2>\n");
+                     "<yellow_gx1> <yellow_gy1> <yellow_gx2> <yellow_gy2> "
+                     "[<end_x> <end_y> <end_heading_deg>]\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -365,6 +366,11 @@ void generateTracerList()
             gates.yellow.gx2 = atoi(spl[17].c_str());
             gates.yellow.gy2 = atoi(spl[18].c_str());
 
+            bool hasFinalPose = result_size == 22;
+            QRPos finalPos = hasFinalPose ? QRPos{atoi(spl[19].c_str()), atoi(spl[20].c_str())}
+                                           : startPos;
+            int finalHeadingDeg = hasFinalPose ? atoi(spl[21].c_str()) : -1;
+
             if(IS_LEFT_COURSE) {
                 auto mirrorQrX = [](int x) { return 5 - x; };
                 auto mirrorGateX = [](int gx) { return 6 - gx; };
@@ -375,6 +381,10 @@ void generateTracerList()
 
                 startPos.x = mirrorQrX(startPos.x);
                 startHeadingDeg = mirrorHeading(startHeadingDeg);
+                if(hasFinalPose) {
+                    finalPos.x = mirrorQrX(finalPos.x);
+                    finalHeadingDeg = mirrorHeading(finalHeadingDeg);
+                }
 
                 gates.red.gx1 = mirrorGateX(gates.red.gx1);
                 gates.red.gx2 = mirrorGateX(gates.red.gx2);
@@ -382,25 +392,85 @@ void generateTracerList()
                 gates.blue.gx2 = mirrorGateX(gates.blue.gx2);
                 gates.yellow.gx1 = mirrorGateX(gates.yellow.gx1);
                 gates.yellow.gx2 = mirrorGateX(gates.yellow.gx2);
-
-                LOGI("RallyTracer mirrored for L-course: start=(%d,%d) heading=%d\n",
-                     startPos.x, startPos.y, startHeadingDeg);
             }
 
             RallyRouteSolver::Config cfg;
             cfg.startPos = startPos;
             cfg.lapCount = lapCount;
+                        cfg.hasFinalPos = hasFinalPose;
+                        cfg.finalPos = finalPos;
             RallyRoute route = RallyRouteSolver::solve(gates, cfg);
 
-            LOGI("RallyTracer(move=%d turn=%d start=(%d,%d) heading=%d lap=%d "
-                 "R=(%d,%d)-(%d,%d) B=(%d,%d)-(%d,%d) Y=(%d,%d)-(%d,%d)): push\n",
-                 movePwm, turnPwm, startPos.x, startPos.y, startHeadingDeg, lapCount,
-                 gates.red.gx1, gates.red.gy1, gates.red.gx2, gates.red.gy2,
-                 gates.blue.gx1, gates.blue.gy1, gates.blue.gx2, gates.blue.gy2,
-                 gates.yellow.gx1, gates.yellow.gy1, gates.yellow.gx2, gates.yellow.gy2);
+              LOGI("RallyTracer(move=%d turn=%d start=(%d,%d) heading=%d lap=%d end=(%d,%d) endHeading=%d): push\n",
+                  movePwm, turnPwm, startPos.x, startPos.y, startHeadingDeg, lapCount,
+                  finalPos.x, finalPos.y, finalHeadingDeg);
 
             gRallyTracer = new RallyTracer(gWalker, route, movePwm, turnPwm, startPos,
-                                           startHeadingDeg);
+                                       startHeadingDeg, finalHeadingDeg);
+            gRallyTracer->addStarter(gStarter);
+            tracerList.push_back(gRallyTracer);
+        } else if(spl[0] == "RallyRouteTracer") {
+            if(result_size < 8 || ((result_size % 2) == 1 && result_size < 11)) {
+                LOGI("RallyRouteTracer requires: <move_pwm> <turn_pwm> <start_x> <start_y> "
+                     "<start_heading_deg> <route_x1> <route_y1> [<route_x2> <route_y2> ...] "
+                     "[<end_x> <end_y> <end_heading_deg>]\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            int movePwm = atoi(spl[1].c_str());
+            int turnPwm = atoi(spl[2].c_str());
+            QRPos startPos = {atoi(spl[3].c_str()), atoi(spl[4].c_str())};
+            int startHeadingDeg = atoi(spl[5].c_str());
+            bool hasFinalPose = (result_size % 2) == 1;
+            size_t routeEndIndex = hasFinalPose ? result_size - 3 : result_size;
+            QRPos finalPos = hasFinalPose
+                ? QRPos{atoi(spl[routeEndIndex].c_str()), atoi(spl[routeEndIndex + 1].c_str())}
+                : startPos;
+            int finalHeadingDeg = hasFinalPose ? atoi(spl[routeEndIndex + 2].c_str()) : -1;
+
+            if(IS_LEFT_COURSE) {
+                auto mirrorQrX = [](int x) { return 5 - x; };
+                auto mirrorHeading = [](int heading) {
+                    int normalized = ((heading % 360) + 360) % 360;
+                    return (180 - normalized + 360) % 360;
+                };
+
+                startPos.x = mirrorQrX(startPos.x);
+                startHeadingDeg = mirrorHeading(startHeadingDeg);
+                if(hasFinalPose) {
+                    finalPos.x = mirrorQrX(finalPos.x);
+                    finalHeadingDeg = mirrorHeading(finalHeadingDeg);
+                }
+            }
+
+            RallyRoute route;
+            QRPos currentPos = startPos;
+            for(size_t i = 6; i < routeEndIndex; i += 2) {
+                QRPos destination = {atoi(spl[i].c_str()), atoi(spl[i + 1].c_str())};
+                if(IS_LEFT_COURSE) {
+                    destination.x = 5 - destination.x;
+                }
+
+                if(destination.isVirtual()) {
+                    route.addStep(RouteStep::virtualDetour(destination, currentPos));
+                } else {
+                    route.addStep(RouteStep::move(destination));
+                    currentPos = destination;
+                }
+            }
+            if(hasFinalPose && currentPos != finalPos) {
+                route.addStep(RouteStep::move(finalPos));
+            }
+
+            LOGI("RallyRouteTracer(move=%d turn=%d start=(%d,%d) heading=%d steps=%u end=(%d,%d) endHeading=%d): push\n",
+                 movePwm, turnPwm, startPos.x, startPos.y, startHeadingDeg,
+                 static_cast<unsigned>(route.size()), finalPos.x, finalPos.y, finalHeadingDeg);
+
+            gRallyTracer = new RallyTracer(gWalker, route, movePwm, turnPwm, startPos,
+                                           startHeadingDeg, finalHeadingDeg);
             gRallyTracer->addStarter(gStarter);
             tracerList.push_back(gRallyTracer);
         } else if(spl[0] == "UltrasonicDistanceLoggerTracer") {

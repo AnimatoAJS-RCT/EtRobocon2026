@@ -17,7 +17,8 @@
 
 RallyTracer::RallyTracer(Walker* walker, const RallyRoute& route,
                          int movePwm, int turnPwm,
-                         QRPos initialPos, int initialHeadingDeg)
+                         QRPos initialPos, int initialHeadingDeg,
+                         int finalHeadingDeg)
     : mWalker(walker),
       mRoute(route),
       mMovePwm(std::max(1, std::abs(movePwm))),
@@ -27,6 +28,8 @@ RallyTracer::RallyTracer(Walker* walker, const RallyRoute& route,
       mCurrentPos(initialPos),
       mHeadingDeg(((initialHeadingDeg % 360) + 360) % 360),
       mTargetHeadingDeg(0),
+    mFinalHeadingDeg(finalHeadingDeg < 0 ? -1 : ((finalHeadingDeg % 360) + 360) % 360),
+    mIsFinalTurning(false),
       mPhaseStartLeftCount(0),
       mPhaseStartRightCount(0),
       mTargetWheelDegrees(0)
@@ -81,6 +84,17 @@ void RallyTracer::run()
 void RallyTracer::startNextStep()
 {
     if(mCurrentStepIndex >= mRoute.size()) {
+        if(mFinalHeadingDeg >= 0 && !mIsFinalTurning) {
+            int turnBodyDeg = shortestTurn(mHeadingDeg, mFinalHeadingDeg);
+            if(std::abs(turnBodyDeg) >= 5) {
+                mIsFinalTurning = true;
+                LOGI("[RALLY] final heading: %d->%d\n", mHeadingDeg, mFinalHeadingDeg);
+                beginTurning(mFinalHeadingDeg);
+                mState = WALKING;
+                return;
+            }
+            mHeadingDeg = mFinalHeadingDeg;
+        }
         mWalker->stop();
         mState = TERMINATED;
         LOGI("[RALLY] all %u steps done\n",
@@ -117,14 +131,16 @@ void RallyTracer::beginTurning(int targetHeadingDeg)
     mTargetWheelDegrees = static_cast<int>(turnBodyDeg * WHEEL_DEGREES_PER_BODY_DEGREE);
     resetPhaseCounters();
     mPhase = TURNING;
-    LOGD("[RALLY] begin turning: bodyDeg=%d wheelDeg=%d\n",
-         turnBodyDeg, mTargetWheelDegrees);
+    LOGD("[RALLY] begin turning: bodyDeg=%d wheelDeg=%d startEncoder=(%d,%d)\n",
+         turnBodyDeg, mTargetWheelDegrees,
+         mPhaseStartLeftCount, mPhaseStartRightCount);
 }
 
 void RallyTracer::beginMoving(int wheelDegrees)
 {
     mTargetWheelDegrees = wheelDegrees;
     resetPhaseCounters();
+    mWalker->beginEncoderCorrection();
     mPhase = MOVING;
     LOGD("[RALLY] begin moving: wheelDeg=%d\n", wheelDegrees);
 }
@@ -133,6 +149,7 @@ void RallyTracer::beginReturning(int wheelDegrees)
 {
     mTargetWheelDegrees = wheelDegrees;
     resetPhaseCounters();
+    mWalker->beginEncoderCorrection();
     mPhase = RETURNING;
     LOGD("[RALLY] begin returning: wheelDeg=%d\n", wheelDegrees);
 }
@@ -165,10 +182,20 @@ void RallyTracer::execTurning()
 {
     int current   = getTurnWheelDegrees();
     int remaining = mTargetWheelDegrees - current;
+    int leftDelta = mWalker->getLeftCount() - mPhaseStartLeftCount;
+    int rightDelta = mWalker->getRightCount() - mPhaseStartRightCount;
 
     if(std::abs(remaining) <= TURN_TOLERANCE) {
         mWalker->brake();
+        LOGD("[RALLY] turn complete: target=%d current=%d encoderDelta=(%d,%d)\n",
+             mTargetWheelDegrees, current, leftDelta, rightDelta);
         mHeadingDeg = mTargetHeadingDeg;
+        if(mIsFinalTurning) {
+            mWalker->stop();
+            mState = TERMINATED;
+            LOGI("[RALLY] final heading reached: %d\n", mHeadingDeg);
+            return;
+        }
         const RouteStep& step = mRoute[mCurrentStepIndex];
         beginMoving(calcMoveWheelDegrees(mCurrentPos, step.destination));
         return;
@@ -181,6 +208,11 @@ void RallyTracer::execTurning()
     } else {
         mWalker->setPwm(mTurnPwm, -mTurnPwm);
     }
+    LOGD_EVERY(10,
+               "[RALLY] turning: target=%d current=%d remaining=%d encoderDelta=(%d,%d) pwm=(%d,%d)\n",
+               mTargetWheelDegrees, current, remaining, leftDelta, rightDelta,
+               remaining > 0 ? -mTurnPwm : mTurnPwm,
+               remaining > 0 ? mTurnPwm : -mTurnPwm);
     mWalker->run();
 }
 
@@ -201,8 +233,7 @@ void RallyTracer::execMoving()
         return;
     }
 
-    mWalker->setPwm(mMovePwm, mMovePwm);
-    mWalker->run();
+    mWalker->runWithEncoderCorrection(mMovePwm, mMovePwm);
 }
 
 void RallyTracer::execReturning()
@@ -217,8 +248,7 @@ void RallyTracer::execReturning()
         return;
     }
 
-    mWalker->setPwm(-mMovePwm, -mMovePwm);
-    mWalker->run();
+    mWalker->runWithEncoderCorrection(-mMovePwm, -mMovePwm);
 }
 
 // ---------------------------------------------------------------------------

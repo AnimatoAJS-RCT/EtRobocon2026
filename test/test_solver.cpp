@@ -305,7 +305,36 @@ static void test_startOnApproach()
               static_cast<int>(RouteStepType::VIRTUAL_DETOUR));
 }
 
-// テスト6: QRPos / RallyRoute の基本動作
+// テスト6: 終了地点への移動も上下左右の1マスずつになる
+static void test_finalPositionUsesOrthogonalSteps()
+{
+    std::printf("\n=== test_finalPositionUsesOrthogonalSteps ===\n");
+
+    GateInfo gates;
+    gates.red    = {2, 2, 2, 3};
+    gates.blue   = {3, 3, 4, 3};
+    gates.yellow = {2, 3, 2, 4};
+
+    RallyRouteSolver::Config cfg;
+    cfg.startPos = {1, 1};
+    cfg.lapCount = 1;
+    cfg.hasFinalPos = true;
+    cfg.finalPos = {4, 4};
+
+    RallyRoute route = RallyRouteSolver::solve(gates, cfg);
+    QRPos current = cfg.startPos;
+    for(std::size_t i = 0; i < route.size(); i++) {
+        const RouteStep& step = route[i];
+        int moveDistance = std::abs(step.destination.x - current.x)
+                         + std::abs(step.destination.y - current.y);
+        EXPECT_EQ(moveDistance, 1);
+        current = step.type == RouteStepType::VIRTUAL_DETOUR ? step.returnPos
+                                                              : step.destination;
+    }
+    EXPECT_TRUE(current == cfg.finalPos);
+}
+
+// テスト7: QRPos / RallyRoute の基本動作
 static void test_primitives()
 {
     std::printf("\n=== test_primitives ===\n");
@@ -351,6 +380,7 @@ int main()
     test_interiorGatesOnly();
     test_bottomLeftEdgeGates();
     test_startOnApproach();
+    test_finalPositionUsesOrthogonalSteps();
 
     std::printf("\n===== RESULT: %d passed, %d failed =====\n",
                 gPassCount, gFailCount);
