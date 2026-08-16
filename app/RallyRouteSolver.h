@@ -18,6 +18,8 @@ public:
     struct Config {
         QRPos startPos = {1, 1};  ///< 走行開始 QR 座標
         int   lapCount = 1;       ///< 周回数 (1〜3)
+        bool  hasFinalPos = false; ///< 終了 QR 座標を追加するかどうか
+        QRPos finalPos = {1, 1};  ///< 走行終了 QR 座標
     };
 
     /**
