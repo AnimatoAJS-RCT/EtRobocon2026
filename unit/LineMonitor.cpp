@@ -43,7 +43,7 @@ int LineMonitor::calDiffReflection()
 
     spikeapi::ColorSensor::HSV hsv;
     mColorSensor.getHSV(hsv);
-    LOGD_EVERY(1, "[LINE_MON] raw=%d\tfiltered=%d\tdiff=%d\th=%u\ts=%u\tv=%u\n", reflection,
+    LOGD_EVERY(100, "[LINE_MON] raw=%d\tfiltered=%d\tdiff=%d\th=%u\ts=%u\tv=%u\n", reflection,
                filteredReflection, diff, hsv.h, hsv.s, hsv.v);
 
     return diff;
