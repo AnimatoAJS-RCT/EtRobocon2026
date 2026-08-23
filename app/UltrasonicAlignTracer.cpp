@@ -16,8 +16,6 @@ UltrasonicAlignTracer::UltrasonicAlignTracer(Walker* walker,
       mMaxDistanceMm(std::max(100, maxDistanceMm)),
       mPushWdeg(static_cast<int>(std::abs(pushDistanceMm) * WHEEL_DEG_PER_MM)),
       mMaxApproachWdeg(static_cast<int>((std::max(100, maxDistanceMm) + 300) * WHEEL_DEG_PER_MM)),
-    mRoughScanStepWdeg(std::max(1, static_cast<int>(ROUGH_SCAN_STEP_BODY_DEG * WHEEL_DEG_PER_BODY_DEG))),
-    mScanStepWdeg(mRoughScanStepWdeg),
       mStartLeftCount(0),
       mStartRightCount(0),
       mPhase(TURN_TO_SWEEP_START),
@@ -27,7 +25,6 @@ UltrasonicAlignTracer::UltrasonicAlignTracer(Walker* walker,
       mSweepCenterWdeg(0),
       mPrimarySweep(true),
             mReverseSweep(false),
-    mPrecisionScan(false),
     mTargetVerifyScan(false),
             mNearAlignScan(false),
             mNearAlignDone(false),
@@ -37,20 +34,16 @@ UltrasonicAlignTracer::UltrasonicAlignTracer(Walker* walker,
       mSampleAttempts(0),
       mValidCount(0),
       mMinValidMm(0),
-    mMeasurementErrorCount(0),
-      mClusterOpen(false),
-      mClusterMinMm(0),
-      mClusterStartWdeg(0),
-      mClusterLastWdeg(0),
-      mClusterSampleCount(0),
+    mNoEchoCount(0),
       mBestFound(false),
-      mBestMinMm(0),
-    mBestMinWdeg(0),
+            mBestMedianMm(0),
       mBestCenterWdeg(0),
-    mSweepValidSamples(0),
-            mSweepErrorSamples(0),
-            mSweepBridgedErrorSamples(0),
+            mSweepValidSamples(0),
+            mSweepNoEchoSamples(0),
             mSweepOutOfRangeSamples(0),
+            mScanPwm(SCAN_PWM_INITIAL),
+            mScanSpeedTicks(0),
+            mScanSpeedStartWdeg(0),
       mLastValidMm(-1),
       mLastValidForwardWdeg(0),
     mApproachStartForwardWdeg(0),
@@ -58,8 +51,6 @@ UltrasonicAlignTracer::UltrasonicAlignTracer(Walker* walker,
     mTargetVerifyAttempted(false),
       mRescanAttempts(0),
       mCreepAttempts(0),
-      mCreepStartForwardWdeg(-1),
-      mCreepTargetWdeg(0),
       mBackupStartForwardWdeg(0),
       mBackupTargetWdeg(0),
       mPendingRescanHalfWdeg(0),
@@ -97,16 +88,11 @@ void UltrasonicAlignTracer::run()
         case WALKING:
             switch(mPhase) {
                 case TURN_TO_SWEEP_START:
-                case SCAN_STEP_TURN:
                 case TURN_TO_TARGET:
                     runTurn();
                     break;
                 case SCAN_SWEEP:
                     runScanSweep();
-                    break;
-                case SCAN_SETTLE:
-                case SCAN_SAMPLE:
-                    runScanMeasure();
                     break;
                 case APPROACH_SETTLE:
                 case APPROACH_SAMPLE:
@@ -117,9 +103,6 @@ void UltrasonicAlignTracer::run()
                     break;
                 case BACKING:
                     runBackup();
-                    break;
-                case CREEPING:
-                    runCreep();
                     break;
                 case PUSHING:
                     runPush();
@@ -151,11 +134,11 @@ void UltrasonicAlignTracer::startSearching()
         // 静止中の初回読取りでDISTLモードへの自動切替を完了させてから旋回する。
         int primeDistance = mUltrasonicSensor->getDistance();
         LOGI("[ULTRA_ALIGN] sensor prime: raw=%dmm status=%s\n",
-            primeDistance, primeDistance < 0 ? "driver-error" : "ready");
+            primeDistance, primeDistance < 0 ? "no-echo" : "ready");
         mReverseSweep = false;
     mState = WALKING;
-    LOGI("[ULTRA_ALIGN] start: half=%d wheelDeg step=%d max=%dmm push=%d wheelDeg\n",
-         mHalfSweepWdeg, mScanStepWdeg, mMaxDistanceMm, mPushWdeg);
+        LOGI("[ULTRA_ALIGN] start: half=%d wheelDeg speed=%ddeg/s max=%dmm push=%d wheelDeg\n",
+            mHalfSweepWdeg, SCAN_TARGET_BODY_DEG_PER_SEC, mMaxDistanceMm, mPushWdeg);
     startSweep(mHalfSweepWdeg, -mHalfSweepWdeg, true);
 }
 
@@ -165,56 +148,31 @@ void UltrasonicAlignTracer::startSweep(int startWdeg, int endWdeg, bool primary)
     mSweepEndWdeg = endWdeg;
     mSweepCenterWdeg = (startWdeg + endWdeg) / 2;
     mPrimarySweep = primary;
-    mScanStepWdeg = mRoughScanStepWdeg;
-    mPrecisionScan = false;
     mTargetVerifyScan = false;
     mNearAlignScan = false;
-    mClusterOpen = false;
-    mBestFound = false;
+    if(!mReverseSweep) {
+        resetHistogram();
+    }
     mSweepValidSamples = 0;
-    mSweepErrorSamples = 0;
-    mSweepBridgedErrorSamples = 0;
+    mSweepNoEchoSamples = 0;
     mSweepOutOfRangeSamples = 0;
     mPhase = TURN_TO_SWEEP_START;
     LOGI("[ULTRA_ALIGN] sweep plan: %d -> %d wheelDeg primary=%d\n",
          startWdeg, endWdeg, primary ? 1 : 0);
 }
 
-void UltrasonicAlignTracer::startPrecisionScan(int centerWdeg)
-{
-    int halfWdeg = static_cast<int>(PRECISION_HALF_BODY_DEG * WHEEL_DEG_PER_BODY_DEG);
-    mTargetTurnWdeg = centerWdeg + halfWdeg;
-    mSweepEndWdeg = centerWdeg - halfWdeg;
-    mSweepCenterWdeg = centerWdeg;
-    mPrecisionScan = true;
-    mScanStepWdeg = std::max(1, static_cast<int>(PRECISION_SCAN_STEP_BODY_DEG * WHEEL_DEG_PER_BODY_DEG));
-    mTargetVerifyScan = false;
-    mClusterOpen = false;
-    mBestFound = false;
-    mSweepValidSamples = 0;
-    mSweepErrorSamples = 0;
-    mSweepBridgedErrorSamples = 0;
-    mSweepOutOfRangeSamples = 0;
-    mPhase = TURN_TO_SWEEP_START;
-    LOGI("[ULTRA_ALIGN] precision scan: %d -> %d wheelDeg around=%d\n",
-         mTargetTurnWdeg, mSweepEndWdeg, centerWdeg);
-}
-
 void UltrasonicAlignTracer::startTargetVerifyScan()
 {
     int halfWdeg = static_cast<int>(TARGET_VERIFY_HALF_BODY_DEG * WHEEL_DEG_PER_BODY_DEG);
     int centerWdeg = mTargetTurnWdeg;
-    mTargetTurnWdeg = centerWdeg + halfWdeg;
-    mSweepEndWdeg = centerWdeg - halfWdeg;
+    mTargetTurnWdeg = std::min(BIN_MAX_WDEG, centerWdeg + halfWdeg);
+    mSweepEndWdeg = std::max(-BIN_MAX_WDEG, centerWdeg - halfWdeg);
     mSweepCenterWdeg = centerWdeg;
-    mPrecisionScan = true;
-    mScanStepWdeg = std::max(1, static_cast<int>(PRECISION_SCAN_STEP_BODY_DEG * WHEEL_DEG_PER_BODY_DEG));
     mTargetVerifyScan = true;
-    mClusterOpen = false;
-    mBestFound = false;
+    mReverseSweep = false;
+    resetHistogram();
     mSweepValidSamples = 0;
-    mSweepErrorSamples = 0;
-    mSweepBridgedErrorSamples = 0;
+    mSweepNoEchoSamples = 0;
     mSweepOutOfRangeSamples = 0;
     mPhase = TURN_TO_SWEEP_START;
     LOGI("[ULTRA_ALIGN] target verify: %d -> %d wheelDeg around=%d\n",
@@ -225,19 +183,16 @@ void UltrasonicAlignTracer::startNearAlignScan()
 {
     int halfWdeg = static_cast<int>(NEAR_ALIGN_HALF_BODY_DEG * WHEEL_DEG_PER_BODY_DEG);
     mNearAlignFallbackWdeg = mTargetTurnWdeg;
-    mTargetTurnWdeg = mNearAlignFallbackWdeg + halfWdeg;
-    mSweepEndWdeg = mNearAlignFallbackWdeg - halfWdeg;
+    mTargetTurnWdeg = std::min(BIN_MAX_WDEG, mNearAlignFallbackWdeg + halfWdeg);
+    mSweepEndWdeg = std::max(-BIN_MAX_WDEG, mNearAlignFallbackWdeg - halfWdeg);
     mSweepCenterWdeg = mNearAlignFallbackWdeg;
     mPrimarySweep = false;
     mReverseSweep = false;
-    mPrecisionScan = false;
     mTargetVerifyScan = false;
     mNearAlignScan = true;
-    mClusterOpen = false;
-    mBestFound = false;
+    resetHistogram();
     mSweepValidSamples = 0;
-    mSweepErrorSamples = 0;
-    mSweepBridgedErrorSamples = 0;
+    mSweepNoEchoSamples = 0;
     mSweepOutOfRangeSamples = 0;
     mPhase = TURN_TO_SWEEP_START;
     LOGI("[ULTRA_ALIGN] near align: %d -> %d wheelDeg around=%d\n",
@@ -251,12 +206,13 @@ void UltrasonicAlignTracer::runTurn()
     }
     if(mPhase == TURN_TO_TARGET) {
         startApproach();
-    } else if(mPhase == TURN_TO_SWEEP_START && !mPrecisionScan) {
-        // 粗探索は反射帯を素早く見つけるため、停止せず連続旋回しながら測定する。
+    } else if(mPhase == TURN_TO_SWEEP_START) {
+        // 旋回中心から離れたセンサを連続移動させ、マルチパス位相を掃引する。
         mSampleWait = 0;
+        mScanPwm = SCAN_PWM_INITIAL;
+        mScanSpeedTicks = 0;
+        mScanSpeedStartWdeg = getTurnWdeg();
         mPhase = SCAN_SWEEP;
-    } else {
-        beginMeasurement(SCAN_SETTLE);
     }
 }
 
@@ -265,8 +221,9 @@ void UltrasonicAlignTracer::runScanSweep()
     if(mSampleWait > 0) {
         mSampleWait--;
     } else {
+        bool hasEcho = false;
         bool valid = false;
-        int distance = readDistanceMm(&valid);
+        int distance = readDistanceMm(&hasEcho, &valid);
         int turnWdeg = getTurnWdeg();
         if(valid && mNearAlignScan) {
             int expected = mLastValidMm
@@ -280,31 +237,23 @@ void UltrasonicAlignTracer::runScanSweep()
                      turnWdeg, distance, expected, maximum);
             }
         }
-        // Bluetoothログ出力は走査ループを遅らせるため、有効エコーだけ記録する。
+        // Bluetoothログ出力で走査周期を乱さないよう、有効エコーも間引いて記録する。
         if(valid) {
-            LOGI("[ULTRA_ALIGN] sweep hit: pos=%d distance=%dmm\n", turnWdeg, distance);
-        } else if(distance < 0) {
-            mSweepErrorSamples++;
+            LOGD_EVERY(10, "[ULTRA_ALIGN] sweep hit: pos=%d distance=%dmm\n",
+                       turnWdeg, distance);
+        } else if(!hasEcho) {
+            mSweepNoEchoSamples++;
         } else {
             mSweepOutOfRangeSamples++;
         }
-        bool bridgeError = distance < 0 && mClusterOpen
-                           && std::abs(turnWdeg - mClusterLastWdeg)
-                                  <= CLUSTER_ERROR_BRIDGE_WDEG;
-        if(bridgeError) {
-            // 短い取得エラーでは反応帯を閉じず、次の正常値を待つ。
-            mSweepBridgedErrorSamples++;
-        } else {
-            feedCluster(distance, valid, turnWdeg);
-        }
         if(valid) {
+            recordHit(distance, turnWdeg);
             mSweepValidSamples++;
         }
         mSampleWait = SCAN_SAMPLE_INTERVAL_TICKS - 1;
     }
 
-    int scanPwmLimit = mReverseSweep ? REVERSE_SCAN_PWM_MAX : TURN_PWM_MAX;
-    if(driveTurnTo(mSweepEndWdeg, scanPwmLimit)) {
+    if(driveScanTo(mSweepEndWdeg)) {
         finishScan();
     }
 }
@@ -317,7 +266,7 @@ void UltrasonicAlignTracer::beginMeasurement(Phase settlePhase)
     mSampleAttempts = 0;
     mValidCount = 0;
     mMinValidMm = 0;
-    mMeasurementErrorCount = 0;
+    mNoEchoCount = 0;
     mPhase = settlePhase;
 }
 
@@ -332,8 +281,9 @@ bool UltrasonicAlignTracer::stepMeasurement(int maxSamples)
         return false;
     }
 
+    bool hasEcho = false;
     bool valid = false;
-    int distance = readDistanceMm(&valid);
+    int distance = readDistanceMm(&hasEcho, &valid);
     LOGD("[ULTRA_ALIGN] sample: pos=%d raw=%dmm valid=%d %d/%d\n",
          getTurnWdeg(), distance, valid ? 1 : 0, mSampleAttempts + 1, maxSamples);
     if(valid) {
@@ -341,129 +291,76 @@ bool UltrasonicAlignTracer::stepMeasurement(int maxSamples)
             mMinValidMm = distance;
         }
         mValidCount++;
-    } else if(distance < 0) {
-        mMeasurementErrorCount++;
+    } else if(!hasEcho) {
+        mNoEchoCount++;
     }
     mSampleAttempts++;
-    if(mSampleAttempts >= maxSamples || mValidCount >= SCAN_SAMPLES) {
+    if(mSampleAttempts >= maxSamples || mValidCount > 0) {
         return true;
     }
     mSampleWait = SAMPLE_TICKS;
     return false;
 }
 
-void UltrasonicAlignTracer::runScanMeasure()
-{
-    mWalker->brake();
-    if(mPhase == SCAN_SETTLE && mSettleRemaining == 0) {
-        mPhase = SCAN_SAMPLE;
-    }
-    if(!stepMeasurement(SCAN_SAMPLES)) {
-        return;
-    }
-
-    int turnWdeg = getTurnWdeg();
-    bool valid = mValidCount > 0;
-    mSweepValidSamples += mValidCount;
-    LOGI("[ULTRA_ALIGN] scan: pos=%d min=%dmm valid=%d/%d\n",
-         turnWdeg, valid ? mMinValidMm : -1, mValidCount, mSampleAttempts);
-    feedCluster(mMinValidMm, valid, turnWdeg);
-
-    // 近距離クラスタが確定したら残りを走査せず打ち切る
-    if(mBestFound && !mClusterOpen && mBestMinMm <= EARLY_ACCEPT_MM) {
-        LOGI("[ULTRA_ALIGN] early accept: min=%dmm\n", mBestMinMm);
-        finishScan();
-        return;
-    }
-
-    int direction = mSweepEndWdeg >= mTargetTurnWdeg ? 1 : -1;
-    int next = mTargetTurnWdeg + direction * mScanStepWdeg;
-    bool passed = direction > 0 ? next > mSweepEndWdeg : next < mSweepEndWdeg;
-    if(passed) {
-        finishScan();
-        return;
-    }
-    mTargetTurnWdeg = next;
-    mPhase = SCAN_STEP_TURN;
-}
-
 void UltrasonicAlignTracer::finishScan()
 {
-    closeCluster();
-        LOGI("[ULTRA_ALIGN] sweep summary: direction=%s valid=%d errors=%d bridged=%d outOfRange=%d best=%d\n",
-            mReverseSweep ? "reverse" : "forward", mSweepValidSamples,
-            mSweepErrorSamples, mSweepBridgedErrorSamples, mSweepOutOfRangeSamples,
-            mBestFound ? mBestMinMm : -1);
+    LOGI("[ULTRA_ALIGN] sweep summary: direction=%s valid=%d noEcho=%d outOfRange=%d\n",
+         mReverseSweep ? "reverse" : "forward", mSweepValidSamples,
+         mSweepNoEchoSamples, mSweepOutOfRangeSamples);
+    if(!mReverseSweep) {
+        int reverseStartWdeg = getTurnWdeg();
+        int reverseEndWdeg = 2 * mSweepCenterWdeg - reverseStartWdeg;
+        mReverseSweep = true;
+        mTargetTurnWdeg = reverseStartWdeg;
+        mSweepEndWdeg = reverseEndWdeg;
+        mSweepValidSamples = 0;
+        mSweepNoEchoSamples = 0;
+        mSweepOutOfRangeSamples = 0;
+        mPhase = TURN_TO_SWEEP_START;
+        LOGI("[ULTRA_ALIGN] reverse sweep: %d -> %d wheelDeg\n",
+             reverseStartWdeg, reverseEndWdeg);
+        return;
+    }
+    selectBestCluster();
     if(mBestFound) {
         if(mNearAlignScan) {
             mNearAlignScan = false;
             mNearAlignDone = true;
             mTargetTurnWdeg = mBestCenterWdeg;
-            mLastValidMm = mBestMinMm;
+            mSweepCenterWdeg = mBestCenterWdeg;
+            mLastValidMm = mBestMedianMm;
             mLastValidForwardWdeg = getForwardWdeg();
             mPhase = TURN_TO_TARGET;
             LOGI("[ULTRA_ALIGN] near align target: center=%d distance=%dmm\n",
-                 mBestCenterWdeg, mBestMinMm);
+                  mBestCenterWdeg, mBestMedianMm);
             return;
         }
-        if(!mPrecisionScan) {
-            // 粗探索で得た反応帯の中央をそのまま正対方位として使う。
-            // ボトルのような丸い対象は最短値より、反射が始まって終わる角度の
-            // 中央の方が、接近後の姿勢誤差に強い。
+           if(!mTargetVerifyScan && !mFoundObject) {
             mFoundObject = true;
             mTargetTurnWdeg = mBestCenterWdeg;
-            mLastValidMm = mBestMinMm;
-            mPhase = TURN_TO_TARGET;
-            LOGI("[ULTRA_ALIGN] target from sweep: center=%d wheelDeg distance=%dmm\n",
-                 mBestCenterWdeg, mBestMinMm);
+              mLastValidMm = mBestMedianMm;
+              LOGI("[ULTRA_ALIGN] candidate: center=%d wheelDeg median=%dmm; verify\n",
+                  mBestCenterWdeg, mBestMedianMm);
+              startTargetVerifyScan();
             return;
         }
         mFoundObject = true;
         mTargetTurnWdeg = mBestCenterWdeg;
-        mLastValidMm = mBestMinMm;
+          mSweepCenterWdeg = mBestCenterWdeg;
+           mLastValidMm = mBestMedianMm;
         mPhase = TURN_TO_TARGET;
-        LOGI("[ULTRA_ALIGN] target: center=%d wheelDeg distance=%dmm\n",
-             mBestCenterWdeg, mBestMinMm);
+           LOGI("[ULTRA_ALIGN] target: center=%d wheelDeg median=%dmm\n",
+               mBestCenterWdeg, mBestMedianMm);
     } else if(mNearAlignScan) {
-        if(!mReverseSweep) {
-            int reverseStartWdeg = getTurnWdeg();
-            int reverseEndWdeg = 2 * mSweepCenterWdeg - reverseStartWdeg;
-            mReverseSweep = true;
-            LOGI("[ULTRA_ALIGN] near align reverse: %d -> %d wheelDeg\n",
-                 reverseStartWdeg, reverseEndWdeg);
-            mTargetTurnWdeg = reverseStartWdeg;
-            mSweepEndWdeg = reverseEndWdeg;
-            mClusterOpen = false;
-            mBestFound = false;
-            mSweepValidSamples = 0;
-            mSweepErrorSamples = 0;
-            mSweepBridgedErrorSamples = 0;
-            mSweepOutOfRangeSamples = 0;
-            mPhase = TURN_TO_SWEEP_START;
-        } else {
-            mNearAlignScan = false;
-            mNearAlignDone = true;
-            mTargetTurnWdeg = mNearAlignFallbackWdeg;
-            mPhase = TURN_TO_TARGET;
-            LOGI("[ULTRA_ALIGN] near align found nothing; keep heading=%d\n",
-                 mTargetTurnWdeg);
-        }
-    } else if(!mPrecisionScan && !mReverseSweep) {
-        // 同じ位置を逆方向にも走査する。センサ更新遅延・機体振動・円筒面の
-        // 反射方向が走査方向に依存しても、片道だけで対象を捨てない。
-        int reverseStartWdeg = getTurnWdeg();
-        int reverseEndWdeg = 2 * mSweepCenterWdeg - reverseStartWdeg;
-        mReverseSweep = true;
-        LOGI("[ULTRA_ALIGN] reverse sweep: %d -> %d wheelDeg\n",
-             reverseStartWdeg, reverseEndWdeg);
-        startSweep(reverseStartWdeg, reverseEndWdeg, mPrimarySweep);
+        mNearAlignScan = false;
+        mNearAlignDone = true;
+        mTargetTurnWdeg = mNearAlignFallbackWdeg;
+        mPhase = TURN_TO_TARGET;
+        LOGI("[ULTRA_ALIGN] near align found nothing; keep heading=%d\n",
+             mTargetTurnWdeg);
     } else if(mTargetVerifyScan) {
         LOGI("[ULTRA_ALIGN] target verify found nothing; rescan\n");
         startRescan();
-    } else if(mPrecisionScan) {
-        LOGI("[ULTRA_ALIGN] precision scan found nothing; resume rough search\n");
-        startSweep(mSweepCenterWdeg + mHalfSweepWdeg,
-                   mSweepCenterWdeg - mHalfSweepWdeg, mPrimarySweep);
     } else if(mPrimarySweep) {
         mReverseSweep = false;
         LOGI("[ULTRA_ALIGN] no object found in primary sweep\n");
@@ -475,79 +372,90 @@ void UltrasonicAlignTracer::finishScan()
     }
 }
 
-void UltrasonicAlignTracer::feedCluster(int distanceMm, bool valid, int turnWdeg)
+void UltrasonicAlignTracer::resetHistogram()
 {
-    if(!valid) {
-        closeCluster();
-        return;
+    for(int bin = 0; bin < BIN_COUNT; bin++) {
+        mBinHitCount[bin] = 0;
+        mBinNextDistance[bin] = 0;
     }
-    if(!mClusterOpen) {
-        mClusterOpen = true;
-        mClusterMinMm = distanceMm;
-        mClusterStartWdeg = turnWdeg;
-        mClusterLastWdeg = turnWdeg;
-        mClusterSampleCount = 0;
-    } else if(std::abs(distanceMm - mClusterMinMm) <= CLUSTER_GAP_MM) {
-        mClusterLastWdeg = turnWdeg;
-        if(distanceMm < mClusterMinMm) {
-            mClusterMinMm = distanceMm;
-        }
-    } else {
-        closeCluster();
-        mClusterOpen = true;
-        mClusterMinMm = distanceMm;
-        mClusterStartWdeg = turnWdeg;
-        mClusterLastWdeg = turnWdeg;
-        mClusterSampleCount = 0;
-    }
-    if(mClusterSampleCount < CLUSTER_MAX_SAMPLES) {
-        mClusterSampleWdeg[mClusterSampleCount] = turnWdeg;
-        mClusterSampleMm[mClusterSampleCount] = distanceMm;
-        mClusterSampleCount++;
-    }
+    mBestFound = false;
 }
 
-void UltrasonicAlignTracer::closeCluster()
+void UltrasonicAlignTracer::recordHit(int distanceMm, int turnWdeg)
 {
-    if(!mClusterOpen) {
+    if(turnWdeg < -BIN_MAX_WDEG || turnWdeg > BIN_MAX_WDEG) {
         return;
     }
-    mClusterOpen = false;
-    int width = std::abs(mClusterLastWdeg - mClusterStartWdeg);
-    // 連続旋回中は対象がビームを横切る時間が短く、1サンプルしか取れない
-    // ことがある。候補は捨てず、TURN_TO_TARGET 後の静止測定で検証する。
-    if(mClusterSampleCount == 0) {
+    int bin = (turnWdeg + BIN_MAX_WDEG) / BIN_WIDTH_WDEG;
+    if(bin < 0 || bin >= BIN_COUNT) {
         return;
     }
-    if(!mBestFound || mClusterMinMm < mBestMinMm) {
-        mBestFound = true;
-        mBestMinMm = mClusterMinMm;
-        mBestMinWdeg = mClusterStartWdeg;
-        for(int i = 0; i < mClusterSampleCount; i++) {
-            if(mClusterSampleMm[i] == mClusterMinMm) {
-                mBestMinWdeg = mClusterSampleWdeg[i];
+    int slot = mBinNextDistance[bin];
+    mBinDistance[bin][slot] = distanceMm;
+    mBinNextDistance[bin] = (slot + 1) % BIN_DISTANCE_CAPACITY;
+    mBinHitCount[bin]++;
+}
+
+int UltrasonicAlignTracer::medianForBin(int bin) const
+{
+    int count = std::min(mBinHitCount[bin], static_cast<int>(BIN_DISTANCE_CAPACITY));
+    int sorted[BIN_DISTANCE_CAPACITY];
+    for(int i = 0; i < count; i++) {
+        sorted[i] = mBinDistance[bin][i];
+    }
+    std::sort(sorted, sorted + count);
+    return sorted[count / 2];
+}
+
+void UltrasonicAlignTracer::selectBestCluster()
+{
+    mBestFound = false;
+    for(int start = 0; start < BIN_COUNT;) {
+        if(mBinHitCount[start] == 0) {
+            start++;
+            continue;
+        }
+        int end = start;
+        while(end + 1 < BIN_COUNT && mBinHitCount[end + 1] > 0) {
+            end++;
+        }
+
+        int distances[CLUSTER_MAX_SAMPLES];
+        int count = 0;
+        for(int bin = start; bin <= end && count < CLUSTER_MAX_SAMPLES; bin++) {
+            int binCount = std::min(mBinHitCount[bin], static_cast<int>(BIN_DISTANCE_CAPACITY));
+            for(int sample = 0; sample < binCount && count < CLUSTER_MAX_SAMPLES; sample++) {
+                distances[count++] = mBinDistance[bin][sample];
             }
         }
-        // 30msポーリングではセンサ内部の同じ値を複数回読む。反応帯の端で
-        // 同一値が連続すると帯が走査方向へ伸びるため、先頭側は最後の重複、
-        // 末尾側は最初の重複を端点として中央を求める。
-        int centerStartIndex = 0;
-        while(centerStartIndex + 1 < mClusterSampleCount
-              && mClusterSampleMm[centerStartIndex + 1] == mClusterSampleMm[0]) {
-            centerStartIndex++;
+        std::sort(distances, distances + count);
+        int median = distances[count / 2];
+
+        // 約100ms更新の同一値が端の複数ビンへ尾を引く分を中央計算から除く。
+                int trimmedStart = start;
+                while(trimmedStart + 1 < end
+              && medianForBin(trimmedStart) == medianForBin(trimmedStart + 1)) {
+            trimmedStart++;
         }
-        int centerEndIndex = mClusterSampleCount - 1;
-        while(centerEndIndex > 0
-              && mClusterSampleMm[centerEndIndex - 1]
-                     == mClusterSampleMm[mClusterSampleCount - 1]) {
-            centerEndIndex--;
+        int trimmedEnd = end;
+                while(trimmedEnd - 1 > start
+              && medianForBin(trimmedEnd) == medianForBin(trimmedEnd - 1)) {
+            trimmedEnd--;
         }
-        int centerStartWdeg = mClusterSampleWdeg[centerStartIndex];
-        int centerEndWdeg = mClusterSampleWdeg[centerEndIndex];
-        mBestCenterWdeg = (centerStartWdeg + centerEndWdeg) / 2;
-        LOGI("[ULTRA_ALIGN] cluster: center=%d span=%d..%d trimmed=%d..%d minPos=%d width=%d min=%dmm\n",
-             mBestCenterWdeg, mClusterStartWdeg, mClusterLastWdeg,
-             centerStartWdeg, centerEndWdeg, mBestMinWdeg, width, mClusterMinMm);
+                if(trimmedStart > trimmedEnd) {
+                        trimmedStart = start;
+                        trimmedEnd = end;
+                }
+        int centerBin = (trimmedStart + trimmedEnd) / 2;
+        int centerWdeg = centerBin * BIN_WIDTH_WDEG - BIN_MAX_WDEG;
+        LOGI("[ULTRA_ALIGN] cluster: bins=%d..%d trimmed=%d..%d center=%d median=%dmm hits=%d\n",
+             start, end, trimmedStart, trimmedEnd, centerWdeg, median, count);
+        if(!mBestFound || median < mBestMedianMm) {
+            mBestFound = true;
+            mBestMedianMm = median;
+            mBestCenterWdeg = centerWdeg;
+        }
+        start = end + 1;
     }
 }
 
@@ -555,40 +463,17 @@ void UltrasonicAlignTracer::startCreep()
 {
     mWalker->brake();
     mReverseSweep = false;
-    int creepMm = std::min(CREEP_FIRST_MM + mCreepAttempts * CREEP_INCREMENT_MM,
-                           CREEP_MAX_MM);
-    mCreepTargetWdeg = static_cast<int>(creepMm * WHEEL_DEG_PER_MM);
-    if(mCreepAttempts >= MAX_CREEP_ATTEMPTS
-       || getForwardWdeg() + mCreepTargetWdeg > mMaxApproachWdeg) {
-        LOGI("[ULTRA_ALIGN] creep attempts exhausted\n");
+    if(mCreepAttempts >= MAX_CREEP_ATTEMPTS) {
+        LOGI("[ULTRA_ALIGN] expanded search attempts exhausted\n");
         finish(false);
         return;
     }
     mCreepAttempts++;
-    mTargetTurnWdeg = mSweepCenterWdeg;
-    mCreepStartForwardWdeg = -1;  // 旋回完了後に前進開始位置を記録する
-    mPhase = CREEPING;
-    LOGI("[ULTRA_ALIGN] creep: attempt=%d heading=%d wheelDeg forward=%dmm then rescan\n",
-            mCreepAttempts, mTargetTurnWdeg, creepMm);
-}
-
-void UltrasonicAlignTracer::runCreep()
-{
-    if(mCreepStartForwardWdeg < 0) {
-        if(!driveTurnTo(mTargetTurnWdeg, TURN_PWM_MAX)) {
-            return;
-        }
-        mCreepStartForwardWdeg = getForwardWdeg();
-        mWalker->beginEncoderCorrection();
-    }
-    if(getForwardWdeg() - mCreepStartForwardWdeg < mCreepTargetWdeg) {
-        driveForward(APPROACH_PWM);
-        return;
-    }
-    mWalker->brake();
     int expandedHalfWdeg = std::min(
         static_cast<int>(MAX_SWEEP_HALF_BODY_DEG * WHEEL_DEG_PER_BODY_DEG),
         mHalfSweepWdeg + static_cast<int>(mCreepAttempts * 30 * WHEEL_DEG_PER_BODY_DEG));
+    LOGI("[ULTRA_ALIGN] expanded search: attempt=%d half=%d wheelDeg\n",
+         mCreepAttempts, expandedHalfWdeg);
     startSweep(expandedHalfWdeg, -expandedHalfWdeg, true);
 }
 
@@ -602,6 +487,12 @@ void UltrasonicAlignTracer::startApproach()
     mTargetVerifyAttempted = false;
     LOGI("[ULTRA_ALIGN] approach begin: heading=%d wheelDeg expect=%dmm\n",
          mTargetTurnWdeg, mLastValidMm);
+    // 連続確認走査のエコーは停止測定より新鮮で、静止フェードの影響も受けにくい。
+    // 実測距離から安全余裕を残す最初のパルスだけは、その値を直接使う。
+    if(mLastValidMm > CONTACT_MM) {
+        startPulse(mLastValidMm - PULSE_KEEP_MM);
+        return;
+    }
     beginMeasurement(APPROACH_SETTLE);
 }
 
@@ -618,10 +509,13 @@ void UltrasonicAlignTracer::runApproachMeasure()
     int forward = getForwardWdeg();
     int predicted = mLastValidMm
                     - static_cast<int>((forward - mLastValidForwardWdeg) / WHEEL_DEG_PER_MM);
+    int travelledSinceEchoMm =
+        static_cast<int>((forward - mLastValidForwardWdeg) / WHEEL_DEG_PER_MM);
     if(forward > mMaxApproachWdeg) {
         // クリープや再探索の前進も上限に含まれるため、目前まで来ているなら
         // 中断せず押し切る
-        if(predicted >= 0 && predicted <= 200) {
+          if(predicted >= 0 && predicted <= 200
+              && travelledSinceEchoMm <= RECENT_ECHO_TRAVEL_MM) {
             LOGI("[ULTRA_ALIGN] approach limit but target near: predicted=%dmm; push\n",
                  predicted);
             startPush(predicted);
@@ -632,24 +526,15 @@ void UltrasonicAlignTracer::runApproachMeasure()
         return;
     }
     if(mValidCount == 0) {
-        if(predicted <= BLIND_MM) {
-            // ボトルがセンサ盲域に入った=接触寸前とみなす
+        if(predicted <= BLIND_MM && travelledSinceEchoMm <= RECENT_ECHO_TRAVEL_MM) {
+            // 直近100mm以内に実測があり、ボトルが盲域へ入った場合だけ接触寸前とみなす。
             LOGI("[ULTRA_ALIGN] blind contact: predicted=%dmm\n", predicted);
             startPush(std::max(0, predicted));
             return;
         }
-        if(mMeasurementErrorCount * 2 >= mSampleAttempts) {
-            // 負値は無反射ではなくPUPドライバエラー。対象の反応帯と距離を
-            // 既に確定できている間は、方位を維持して予測距離まで接近し、
-            // 停止後に再測定する。
-            LOGI("[ULTRA_ALIGN] distance driver errors=%d/%d predicted=%dmm; blind pulse\n",
-                 mMeasurementErrorCount, mSampleAttempts, predicted);
-            startPulse(predicted - PULSE_KEEP_MM);
-            return;
-        }
         mInvalidRounds++;
-        LOGI("[ULTRA_ALIGN] no target echo: predicted=%dmm errors=%d/%d round=%d\n",
-             predicted, mMeasurementErrorCount, mSampleAttempts, mInvalidRounds);
+           LOGI("[ULTRA_ALIGN] no target echo: predicted=%dmm noEcho=%d/%d round=%d\n",
+               predicted, mNoEchoCount, mSampleAttempts, mInvalidRounds);
         if(mInvalidRounds >= 2) {
             if(!mTargetVerifyAttempted) {
                 mTargetVerifyAttempted = true;
@@ -731,7 +616,7 @@ void UltrasonicAlignTracer::startRescan()
                                        / WHEEL_DEG_PER_MM);
         if(predicted < 0) predicted = 0;
     }
-    int backupMm = RESCAN_STANDOFF_MM - predicted;
+    int backupMm = std::min(RESCAN_STANDOFF_MM - predicted, RESCAN_BACKUP_MAX_MM);
     if(backupMm > 0) {
         mBackupStartForwardWdeg = getForwardWdeg();
         mBackupTargetWdeg = static_cast<int>(backupMm * WHEEL_DEG_PER_MM);
@@ -760,17 +645,20 @@ void UltrasonicAlignTracer::runBackup()
 
 void UltrasonicAlignTracer::doRescanSweep()
 {
-    int center = getTurnWdeg();
+    int center = std::max(-BIN_MAX_WDEG, std::min(mSweepCenterWdeg, BIN_MAX_WDEG));
+    int start = std::min(BIN_MAX_WDEG, center + mPendingRescanHalfWdeg);
+    int end = std::max(-BIN_MAX_WDEG, center - mPendingRescanHalfWdeg);
     mReverseSweep = false;
-    LOGI("[ULTRA_ALIGN] rescan: attempt=%d center=%d half=%d wheelDeg\n",
-         mRescanAttempts, center, mPendingRescanHalfWdeg);
-    startSweep(center + mPendingRescanHalfWdeg, center - mPendingRescanHalfWdeg, false);
+    LOGI("[ULTRA_ALIGN] rescan: attempt=%d center=%d range=%d..%d wheelDeg\n",
+        mRescanAttempts, center, start, end);
+    startSweep(start, end, false);
 }
 
 void UltrasonicAlignTracer::startPush(int remainingMm)
 {
     mPushStartForwardWdeg = getForwardWdeg();
     mPushTargetWdeg = mPushWdeg + static_cast<int>(remainingMm * WHEEL_DEG_PER_MM);
+    mSampleWait = SAMPLE_TICKS;
     mWalker->beginEncoderCorrection();
     mPhase = PUSHING;
     LOGI("[ULTRA_ALIGN] push begin: %d wheelDeg (remaining=%dmm)\n",
@@ -784,7 +672,31 @@ void UltrasonicAlignTracer::runPush()
         finish(true);
         return;
     }
+
+    if(--mSampleWait <= 0) {
+        bool hasEcho = false;
+        bool inRange = false;
+        int distance = readDistanceMm(&hasEcho, &inRange);
+        mSampleWait = SAMPLE_TICKS;
+        if(hasEcho && inRange && distance > CONTACT_MM + PUSH_LOST_RISE_MM) {
+            LOGI("[ULTRA_ALIGN] push lost: reading=%dmm; backup=%dmm then rescan\n",
+                 distance, PUSH_LOST_BACKUP_MM);
+            startPushLostRescan();
+            return;
+        }
+    }
     driveForward(PUSH_PWM);
+}
+
+void UltrasonicAlignTracer::startPushLostRescan()
+{
+    mWalker->brake();
+    mBackupStartForwardWdeg = getForwardWdeg();
+    mBackupTargetWdeg = static_cast<int>(PUSH_LOST_BACKUP_MM * WHEEL_DEG_PER_MM);
+    // 現在方位に依存せず、探索可能な全範囲を往復する。
+    mPendingRescanHalfWdeg = BIN_MAX_WDEG * 2;
+    mWalker->beginEncoderCorrection();
+    mPhase = BACKING;
 }
 
 void UltrasonicAlignTracer::finish(bool pushed)
@@ -839,6 +751,43 @@ bool UltrasonicAlignTracer::driveTurnTo(int targetWdeg, int pwmLimit)
     return false;
 }
 
+bool UltrasonicAlignTracer::driveScanTo(int targetWdeg)
+{
+    int error = targetWdeg - getTurnWdeg();
+    if(std::abs(error) <= TURN_TOLERANCE_WDEG) {
+        mWalker->brake();
+        return true;
+    }
+
+    mScanSpeedTicks++;
+    if(mScanSpeedTicks >= SCAN_SPEED_WINDOW_TICKS) {
+        int travelled = std::abs(getTurnWdeg() - mScanSpeedStartWdeg);
+        int targetTravel = static_cast<int>(SCAN_TARGET_BODY_DEG_PER_SEC
+                                            * WHEEL_DEG_PER_BODY_DEG
+                                            * SCAN_SPEED_WINDOW_TICKS / 100.0);
+        mScanPwm += (targetTravel - travelled) / 2;
+        mScanPwm = std::max(SCAN_PWM_MIN, std::min(mScanPwm, SCAN_PWM_MAX));
+        int bodyDegPerSec = static_cast<int>(travelled * 100.0
+                                            / WHEEL_DEG_PER_BODY_DEG
+                                            / SCAN_SPEED_WINDOW_TICKS);
+        LOGD_EVERY(10, "[ULTRA_ALIGN] scan drive: speed=%ddeg/s pwm=%d travelled=%d\n",
+                   bodyDegPerSec, mScanPwm, travelled);
+        mScanSpeedTicks = 0;
+        mScanSpeedStartWdeg = getTurnWdeg();
+    }
+
+    int leftBoost = 0;
+    int rightBoost = 0;
+    updateStall(&leftBoost, &rightBoost);
+    if(error > 0) {
+        mWalker->setPwm(-(mScanPwm + leftBoost), mScanPwm + rightBoost);
+    } else {
+        mWalker->setPwm(mScanPwm + leftBoost, -(mScanPwm + rightBoost));
+    }
+    mWalker->run();
+    return false;
+}
+
 void UltrasonicAlignTracer::driveForward(int basePwm)
 {
     int leftBoost = 0;
@@ -885,10 +834,10 @@ int UltrasonicAlignTracer::getForwardWdeg() const
     return (leftDelta + rightDelta) / 2;
 }
 
-int UltrasonicAlignTracer::readDistanceMm(bool* valid) const
+int UltrasonicAlignTracer::readDistanceMm(bool* hasEcho, bool* inRange) const
 {
     int distance = mUltrasonicSensor->getDistance();
-    int upperLimit = std::min(mMaxDistanceMm, SENSOR_INVALID_MM);
-    *valid = distance >= MIN_VALID_MM && distance < upperLimit;
+    *hasEcho = distance >= MIN_VALID_MM && distance < SENSOR_MAX_VALID_MM;
+    *inRange = *hasEcho && distance <= mMaxDistanceMm;
     return distance;
 }

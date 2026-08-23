@@ -7,14 +7,11 @@
 
 // ET相撲用: ボトルを検出し、正対して接近し、押し出す。
 //
-// 実測知見: SPIKEの超音波センサは回転・移動しながらだと有効なエコーが
-// ほぼ取れない(2026-07-19ログで有効測定0件)。静止時は安定して取れるため、
-// スキャン・接近とも「動く→止まる→測る」のステップ方式で構成する。
+// DISTLの-1はドライバエラーではなく、有効な距離を取得できなかった無反射値。
 //
 // 動作の流れ:
-//   1. SCAN: 小刻みに旋回→ブレーキ→整定→静止測定を繰り返し、
-//      有効測定のクラスタ(=ボトル)のうち最も近いものの中心角を求める。
-//      近距離クラスタが確定したら全範囲を回りきらず打ち切って高速化。
+//   1. SCAN: 約35deg/sで連続往復旋回し、2度ごとの方位ビンへエコーを累積する。
+//      1回以上ヒットした連続ビンを対象とし、距離中央値が最小の塊を選ぶ。
 //   2. TURN_TO_TARGET: クラスタ中心へ旋回
 //   3. APPROACH: 残距離に応じた長さの前進パルス→停止→測定を繰り返す。
 //      距離が想定より増えたら範囲を広げて再スキャン(最大3回)。
@@ -22,7 +19,6 @@
 //      その後の走行距離)が盲域に入ったら押し出しへ
 //   5. PUSH: 高PWM・方位保持で指定距離を押し切る
 //
-// 999mm前後の「エコーなし」センチネルと負値は常に無効扱い。
 // 低PWM停動対策として、エンコーダが動かない間はPWMを自動ブーストする。
 class UltrasonicAlignTracer : public Tracer {
 public:
@@ -37,15 +33,11 @@ private:
     enum Phase {
         TURN_TO_SWEEP_START,
         SCAN_SWEEP,
-        SCAN_STEP_TURN,
-        SCAN_SETTLE,
-        SCAN_SAMPLE,
         TURN_TO_TARGET,
         APPROACH_SETTLE,
         APPROACH_SAMPLE,
         APPROACH_PULSE,
         BACKING,
-        CREEPING,
         PUSHING,
         RETURNING,
         RETURN_TURNING,
@@ -56,23 +48,22 @@ private:
     static constexpr double WHEEL_DEG_PER_MM = 2.05;
 
     // 旋回: 比例制御 + 静止摩擦に負けない下限PWM
-    static const int TURN_PWM_MIN = 17;
-    static const int TURN_PWM_MAX = 30;
-    static const int REVERSE_SCAN_PWM_MAX = 20;
+    static const int TURN_PWM_MIN = 22;
+    static const int TURN_PWM_MAX = 40;
     static const int TURN_TOLERANCE_WDEG = 3;
 
-    // スキャン: 1ステップの角度と静止測定の設定
-    static const int ROUGH_SCAN_STEP_BODY_DEG = 8;
-    static const int PRECISION_SCAN_STEP_BODY_DEG = 3;
-    static const int SCAN_SAMPLE_INTERVAL_TICKS = 3;   // 30ms（粗探索中）
-    static const int PRECISION_HALF_BODY_DEG = 25;
-    static const int TARGET_VERIFY_HALF_BODY_DEG = 25;
+    // 30msごとの読取りはセンサ内部の約100ms更新より速く、ピング数とは一致しない。
+    static const int SCAN_SAMPLE_INTERVAL_TICKS = 3;
+    static const int SCAN_TARGET_BODY_DEG_PER_SEC = 35;
+    static const int SCAN_SPEED_WINDOW_TICKS = 10;
+    static const int SCAN_PWM_MIN = 22;
+    static const int SCAN_PWM_MAX = 35;
+    static const int SCAN_PWM_INITIAL = 25;
+    static const int TARGET_VERIFY_HALF_BODY_DEG = 30;
     static const int NEAR_ALIGN_HALF_BODY_DEG = 20;
     static const int SETTLE_TICKS = 8;        // ブレーキ後の整定 (80ms)
     static const int SAMPLE_TICKS = 10;       // サンプル間隔 (100ms; センサ更新≒10Hz)
-    static const int SCAN_SAMPLES = 2;        // ステップごとの測定回数
-    static const int APPROACH_SAMPLES = 5;    // 接近時の測定回数(有効3つで打ち切り)
-    static const int EARLY_ACCEPT_MM = 320;   // これより近いクラスタ確定で走査打ち切り
+    static const int APPROACH_SAMPLES = 5;
 
     // 接近・押し出し
     static const int APPROACH_PWM = 35;
@@ -85,36 +76,34 @@ private:
     static const int NEAR_ALIGN_AFTER_MM = 120;
     static const int NEAR_ALIGN_FAR_TOLERANCE_MM = 150;
 
-    // 距離の有効範囲。999は「エコーなし」センチネルなので常に除外する
-    static const int MIN_VALID_MM = 25;
-    static const int SENSOR_INVALID_MM = 900;
+    // DISTLの物理レンジと、近距離で飽和する実機値を含む下限。
+    static const int MIN_VALID_MM = 50;
+    static const int SENSOR_MAX_VALID_MM = 2500;
 
-    // クラスタ判定: クラスタ内最小距離との許容差 / ノイズ棄却の最小角幅
-    static const int CLUSTER_GAP_MM = 80;
-    static const int CLUSTER_MIN_WIDTH_WDEG = 5;
-    static const int CLUSTER_ERROR_BRIDGE_WDEG = 16;  // 約10度以内の取得エラーを同一反応帯として接続
-    // クラスタ弧全体はビーム幅で実際より広がる(左右非対称だと中心もずれる)ため、
-    // 狙う角度は「最小距離+この値」以内の測定が集まる狭い範囲の中央にする
-    static const int CLUSTER_NEAR_BAND_MM = 30;
+    // 方位占有ヒストグラム。1ビンでもヒットすれば反射ありとする(1-of-M)。
+    static const int BIN_WIDTH_WDEG = 3;  // 車体角約2度
+    static const int BIN_MAX_WDEG = 140;  // 車体角約90度
+    static const int BIN_COUNT = BIN_MAX_WDEG * 2 / BIN_WIDTH_WDEG + 1;
+    static const int BIN_DISTANCE_CAPACITY = 8;
     static const int CLUSTER_MAX_SAMPLES = 64;
 
     // 接触・ロスト判定
     static const int CONTACT_MM = 90;         // 実機では80mm前後で値が飽和するため、この値以下で接触
     static const int BLIND_MM = 100;          // 予測距離がこれ以下なら盲域(最短検知9cm)=接触寸前
+    static const int RECENT_ECHO_TRAVEL_MM = 100;
     static const int LOST_RISE_MM = 150;      // 予測よりこれ以上遠い値はロスト
+    static const int PUSH_LOST_RISE_MM = 150; // 押出し中にこの分以上遠い反射は対象喪失
     static const int MAX_RESCAN_ATTEMPTS = 3;
     static const int RESCAN_HALF_BODY_DEG = 35;  // 再スキャン半角(試行ごとに拡大)
     // 最短検知距離(9cm)より近い位置で旋回するとアームがボトルに当たるため、
     // 再スキャン前にこの距離まで後退して離れる
-    static const int RESCAN_STANDOFF_MM = 350;
+    static const int RESCAN_STANDOFF_MM = 150;
+    static const int RESCAN_BACKUP_MAX_MM = 50;
 
-    // クリープ探索: スキャンで見つからないとき前進して再スキャンする
-    // (センサはボトルが近いほど確実に見えるため、近づいて検出圏内に入れる)
-    static const int CREEP_FIRST_MM = 200;
-    static const int CREEP_INCREMENT_MM = 50;
-    static const int CREEP_MAX_MM = 300;
+    // 未検出時は前進せず、同じ位置で探索範囲だけを段階的に拡大する。
     static const int MAX_CREEP_ATTEMPTS = 2;
-    static const int MAX_SWEEP_HALF_BODY_DEG = 175;
+    static const int MAX_SWEEP_HALF_BODY_DEG = 90;
+    static const int PUSH_LOST_BACKUP_MM = 100;
 
     // 終了時は開始地点より少し後方まで退避して、次のゴール走行の方位を固定する
     static const int RETURN_STANDOFF_MM = 150;
@@ -131,8 +120,6 @@ private:
     int mMaxDistanceMm;
     int mPushWdeg;
     int mMaxApproachWdeg;
-    int mRoughScanStepWdeg;
-    int mScanStepWdeg;
 
     int mStartLeftCount;
     int mStartRightCount;
@@ -146,7 +133,6 @@ private:
     int mSweepCenterWdeg;
     bool mPrimarySweep;  // 初回スキャンか(false=再スキャン)
     bool mReverseSweep;
-    bool mPrecisionScan;
     bool mTargetVerifyScan;
     bool mNearAlignScan;
     bool mNearAlignDone;
@@ -158,24 +144,21 @@ private:
     int mSampleAttempts;
     int mValidCount;
     int mMinValidMm;
-    int mMeasurementErrorCount;
+    int mNoEchoCount;
 
-    // オンラインクラスタリング
-    bool mClusterOpen;
-    int mClusterMinMm;
-    int mClusterStartWdeg;
-    int mClusterLastWdeg;
-    int mClusterSampleCount;
-    int mClusterSampleWdeg[CLUSTER_MAX_SAMPLES];
-    int mClusterSampleMm[CLUSTER_MAX_SAMPLES];
+    // 往路・復路で共有する方位占有ヒストグラム
+    int mBinHitCount[BIN_COUNT];
+    int mBinDistance[BIN_COUNT][BIN_DISTANCE_CAPACITY];
+    int mBinNextDistance[BIN_COUNT];
     bool mBestFound;
-    int mBestMinMm;
-    int mBestMinWdeg;
+    int mBestMedianMm;
     int mBestCenterWdeg;
     int mSweepValidSamples;
-    int mSweepErrorSamples;
-    int mSweepBridgedErrorSamples;
+    int mSweepNoEchoSamples;
     int mSweepOutOfRangeSamples;
+    int mScanPwm;
+    int mScanSpeedTicks;
+    int mScanSpeedStartWdeg;
 
     // 接近時の追跡状態
     int mLastValidMm;
@@ -185,8 +168,6 @@ private:
     bool mTargetVerifyAttempted;
     int mRescanAttempts;
     int mCreepAttempts;
-    int mCreepStartForwardWdeg;
-    int mCreepTargetWdeg;
     int mBackupStartForwardWdeg;
     int mBackupTargetWdeg;
     int mPendingRescanHalfWdeg;
@@ -208,13 +189,10 @@ private:
 
     void startSearching();
     void startSweep(int startWdeg, int endWdeg, bool primary);
-    void startPrecisionScan(int centerWdeg);
     void startTargetVerifyScan();
     void startNearAlignScan();
     void runTurn();
     void runScanSweep();
-    void runScanStepTurn();
-    void runScanMeasure();
     void finishScan();
     void beginMeasurement(Phase settlePhase);
     bool stepMeasurement(int maxSamples);  // trueで測定一巡完了
@@ -226,20 +204,23 @@ private:
     void startApproach();
     void startPulse(int distanceMm);
     void startPush(int remainingMm);
+    void startPushLostRescan();
     void startRescan();
     void doRescanSweep();
     void runBackup();
     void startCreep();
-    void runCreep();
-    void feedCluster(int distanceMm, bool valid, int turnWdeg);
-    void closeCluster();
+    void resetHistogram();
+    void recordHit(int distanceMm, int turnWdeg);
+    void selectBestCluster();
+    int medianForBin(int bin) const;
     void finish(bool pushed);
     bool driveTurnTo(int targetWdeg, int pwmLimit);
+    bool driveScanTo(int targetWdeg);
     void driveForward(int basePwm);
     void updateStall(int* leftBoost, int* rightBoost);
     int getTurnWdeg() const;
     int getForwardWdeg() const;
-    int readDistanceMm(bool* valid) const;
+    int readDistanceMm(bool* hasEcho, bool* inRange) const;
 };
 
 #endif  // ETTR_APP_ULTRASONICALIGNTRACER_H_
