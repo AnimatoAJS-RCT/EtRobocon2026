@@ -44,7 +44,11 @@ RallyTracer::RallyTracer(Walker* walker, const RallyRoute& route,
       mMarkerSnapWindowDegrees(std::max(1, markerSnapWindowDegrees)),
       mMarkerCooldownTicks(std::max(0, markerCooldownTicks)),
       mMarkerCooldownRemaining(0),
-      mMarkerDetectedInPhase(false)
+    mMarkerDetectedInPhase(false),
+    mMarkerSearchStage(0),
+    mMarkerSearchHeadingDeg(0),
+    mMarkerSearchFirstTurnWheelDegrees(0),
+    mIsMarkerSearchRecoveryTurning(false)
 {
     mState = UNDEFINED;
 }
@@ -78,6 +82,8 @@ void RallyTracer::run()
                 case TURNING:   execTurning();   break;
                 case MOVING:    execMoving();    break;
                 case RETURNING: execReturning(); break;
+                case MARKER_OFFSET: execMarkerOffset(); break;
+                case MARKER_SEARCH: execMarkerSearch(); break;
             }
             break;
 
@@ -155,6 +161,7 @@ void RallyTracer::beginMoving(int wheelDegrees)
     mWalker->beginEncoderCorrection();
     mPhase = MOVING;
     mMarkerDetectedInPhase = false;
+    mIsMarkerSearchRecoveryTurning = false;
     LOGD("[RALLY] begin moving: wheelDeg=%d\n", wheelDegrees);
 }
 
@@ -166,6 +173,39 @@ void RallyTracer::beginReturning(int wheelDegrees)
     mPhase = RETURNING;
     mMarkerDetectedInPhase = false;
     LOGD("[RALLY] begin returning: wheelDeg=%d\n", wheelDegrees);
+}
+
+void RallyTracer::beginMarkerOffset()
+{
+    mTargetWheelDegrees = MARKER_TO_CENTER_WHEEL_DEGREES;
+    resetPhaseCounters();
+    mWalker->beginEncoderCorrection();
+    mPhase = MARKER_OFFSET;
+    LOGI("[RALLY] marker offset: wheelDeg=%d\n", mTargetWheelDegrees);
+}
+
+void RallyTracer::beginMarkerSearch()
+{
+    int turnWheelDegrees = static_cast<int>(MARKER_SEARCH_ANGLE_DEGREES
+                                             * WHEEL_DEGREES_PER_BODY_DEGREE);
+    mMarkerSearchStage = 0;
+    mMarkerSearchHeadingDeg = mHeadingDeg;
+    mMarkerSearchFirstTurnWheelDegrees = turnWheelDegrees;
+    mTargetWheelDegrees = turnWheelDegrees;
+    resetPhaseCounters();
+    mPhase = MARKER_SEARCH;
+    LOGI("[RALLY] marker search: heading=%d range=+-%ddeg\n",
+         mMarkerSearchHeadingDeg, MARKER_SEARCH_ANGLE_DEGREES);
+}
+
+void RallyTracer::completeMovingStep()
+{
+    const RouteStep& step = mRoute[mCurrentStepIndex];
+    if(step.type == RouteStepType::VIRTUAL_DETOUR) {
+        beginReturning(calcMoveWheelDegrees(mCurrentPos, step.destination));
+    } else {
+        finishStep();
+    }
 }
 
 void RallyTracer::finishStep()
@@ -210,6 +250,11 @@ void RallyTracer::execTurning()
             LOGI("[RALLY] final heading reached: %d\n", mHeadingDeg);
             return;
         }
+        if(mIsMarkerSearchRecoveryTurning) {
+            mIsMarkerSearchRecoveryTurning = false;
+            completeMovingStep();
+            return;
+        }
         const RouteStep& step = mRoute[mCurrentStepIndex];
         beginMoving(calcMoveWheelDegrees(mCurrentPos, step.destination));
         return;
@@ -235,19 +280,81 @@ void RallyTracer::execMoving()
     int current   = getMoveWheelDegrees();
     int remaining = mTargetWheelDegrees - current;
 
-    if(remaining <= MOVE_TOLERANCE || isMarkerSnapTriggered(remaining)) {
+    if(remaining <= MOVE_TOLERANCE) {
         mWalker->brake();
-        const RouteStep& step = mRoute[mCurrentStepIndex];
-        if(step.type == RouteStepType::VIRTUAL_DETOUR) {
-            // 仮想 QR に到達 → 同じ距離だけ後退して戻る
-            beginReturning(mTargetWheelDegrees);
+        if(mEnableMarkerCorrection && mColorSensor != nullptr) {
+            beginMarkerSearch();
         } else {
-            finishStep();
+            completeMovingStep();
+        }
+        return;
+    }
+
+    if(isMarkerSnapTriggered(remaining)) {
+        mWalker->brake();
+        beginMarkerOffset();
+        return;
+    }
+
+    mWalker->runWithEncoderCorrection(mMovePwm, mMovePwm);
+}
+
+void RallyTracer::execMarkerOffset()
+{
+    int current = getMoveWheelDegrees();
+    if(current >= mTargetWheelDegrees - MOVE_TOLERANCE) {
+        mWalker->brake();
+        LOGI("[RALLY] marker offset complete: moved=%d\n", current);
+        if(mIsMarkerSearchRecoveryTurning) {
+            beginTurning(mMarkerSearchHeadingDeg);
+        } else {
+            completeMovingStep();
         }
         return;
     }
 
     mWalker->runWithEncoderCorrection(mMovePwm, mMovePwm);
+}
+
+void RallyTracer::execMarkerSearch()
+{
+    int current = getTurnWheelDegrees();
+    int accumulated = mMarkerSearchStage == 0
+        ? current : mMarkerSearchFirstTurnWheelDegrees + current;
+
+    if(isMarkerDetected()) {
+        int bodyDeg = static_cast<int>(accumulated / WHEEL_DEGREES_PER_BODY_DEGREE);
+        mHeadingDeg = ((mMarkerSearchHeadingDeg + bodyDeg) % 360 + 360) % 360;
+        mIsMarkerSearchRecoveryTurning = true;
+        mWalker->brake();
+        LOGI("[RALLY] marker found during search: heading=%d\n", mHeadingDeg);
+        beginMarkerOffset();
+        return;
+    }
+
+    if(std::abs(mTargetWheelDegrees - current) <= TURN_TOLERANCE) {
+        if(mMarkerSearchStage == 0) {
+            mMarkerSearchStage = 1;
+            mTargetWheelDegrees = -2 * mMarkerSearchFirstTurnWheelDegrees;
+            resetPhaseCounters();
+            LOGD("[RALLY] marker search: sweep opposite direction\n");
+            return;
+        }
+
+        mHeadingDeg = ((mMarkerSearchHeadingDeg - MARKER_SEARCH_ANGLE_DEGREES) % 360 + 360) % 360;
+        mIsMarkerSearchRecoveryTurning = true;
+        mWalker->brake();
+        LOGI("[RALLY] marker search: not found\n");
+        beginTurning(mMarkerSearchHeadingDeg);
+        return;
+    }
+
+    if(mTargetWheelDegrees >= 0) {
+        mWalker->setPwm(-mTurnPwm, mTurnPwm);
+    } else {
+        mWalker->setPwm(mTurnPwm, -mTurnPwm);
+    }
+    mWalker->run();
 }
 
 void RallyTracer::execReturning()
@@ -294,10 +401,21 @@ bool RallyTracer::isMarkerSnapTriggered(int remainingDegrees)
     if(!mEnableMarkerCorrection || mColorSensor == nullptr) {
         return false;
     }
-    if(mMarkerDetectedInPhase) {
+    if(remainingDegrees > mMarkerSnapWindowDegrees) {
         return false;
     }
-    if(remainingDegrees > mMarkerSnapWindowDegrees) {
+    if(!isMarkerDetected()) {
+        return false;
+    }
+
+    LOGI("[RALLY] marker snap: remain=%d window=%d\n",
+         remainingDegrees, mMarkerSnapWindowDegrees);
+    return true;
+}
+
+bool RallyTracer::isMarkerDetected()
+{
+    if(!mEnableMarkerCorrection || mColorSensor == nullptr || mMarkerDetectedInPhase) {
         return false;
     }
     if(mMarkerCooldownRemaining > 0) {
@@ -312,8 +430,8 @@ bool RallyTracer::isMarkerSnapTriggered(int remainingDegrees)
 
     mMarkerDetectedInPhase = true;
     mMarkerCooldownRemaining = mMarkerCooldownTicks;
-    LOGI("[RALLY] marker snap: reflection=%d remain=%d window=%d\n",
-         reflection, remainingDegrees, mMarkerSnapWindowDegrees);
+        LOGI("[RALLY] marker detected: reflection=%d threshold=%d\n",
+            reflection, mMarkerReflectionThreshold);
     return true;
 }
 

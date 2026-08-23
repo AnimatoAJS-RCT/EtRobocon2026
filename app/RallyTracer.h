@@ -64,11 +64,19 @@ public:
     /// 直進完了の許容誤差 [ホイール度]
     static const int MOVE_TOLERANCE = 10;
 
+    /// 前方カメラがマーカーを検出してから車体中心が通過するまでのホイール角 [度]
+    static const int MARKER_TO_CENTER_WHEEL_DEGREES = 180;
+
+    /// マーカー未検出時に片側へ探索する車体角 [度]
+    static const int MARKER_SEARCH_ANGLE_DEGREES = 15;
+
 private:
     enum Phase {
         TURNING,    ///< 目標方向へ旋回中
         MOVING,     ///< 目標 QR へ前進中
         RETURNING,  ///< 仮想 QR から実 QR へ後退中 (VIRTUAL_DETOUR 専用)
+        MARKER_OFFSET, ///< マーカー検出後、車体中心をマーカー位置まで進める
+        MARKER_SEARCH, ///< マーカー未検出時にカメラを左右へ首振りする
     };
 
     Walker* mWalker;
@@ -95,20 +103,30 @@ private:
     int mMarkerCooldownTicks;
     int mMarkerCooldownRemaining;
     bool mMarkerDetectedInPhase;
+    int mMarkerSearchStage;
+    int mMarkerSearchHeadingDeg;
+    int mMarkerSearchFirstTurnWheelDegrees;
+    bool mIsMarkerSearchRecoveryTurning;
 
     // ---- フェーズ遷移 ----
     void startNextStep();
     void beginTurning(int targetHeadingDeg);
     void beginMoving(int wheelDegrees);
     void beginReturning(int wheelDegrees);
+    void beginMarkerOffset();
+    void beginMarkerSearch();
+    void completeMovingStep();
     void finishStep();
 
     // ---- フェーズ実行 ----
     void execTurning();
     void execMoving();
     void execReturning();
+    void execMarkerOffset();
+    void execMarkerSearch();
 
     bool isMarkerSnapTriggered(int remainingDegrees);
+    bool isMarkerDetected();
 
     // ---- ユーティリティ ----
     /// 旋回量を計測 [ホイール度、反時計回りが正]
