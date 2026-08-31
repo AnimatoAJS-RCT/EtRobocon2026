@@ -26,7 +26,12 @@ public:
                           const spikeapi::UltrasonicSensor* ultrasonicSensor,
                           int halfSweepAngleDeg,
                           int maxDistanceMm,
-                          int pushDistanceMm);
+                          int pushDistanceMm,
+                          int scanTurnDegPerSec,
+                          int approachPwm,
+                          int pushPwm,
+                          int measureHz,
+                          int scanMeasureHz);
     void run() override;
 
 private:
@@ -53,8 +58,6 @@ private:
     static const int TURN_TOLERANCE_WDEG = 3;
 
     // 30msごとの読取りはセンサ内部の約100ms更新より速く、ピング数とは一致しない。
-    static const int SCAN_SAMPLE_INTERVAL_TICKS = 3;
-    static const int SCAN_TARGET_BODY_DEG_PER_SEC = 35;
     static const int SCAN_SPEED_WINDOW_TICKS = 10;
     static const int SCAN_PWM_MIN = 22;
     static const int SCAN_PWM_MAX = 35;
@@ -62,12 +65,9 @@ private:
     static const int TARGET_VERIFY_HALF_BODY_DEG = 30;
     static const int NEAR_ALIGN_HALF_BODY_DEG = 20;
     static const int SETTLE_TICKS = 8;        // ブレーキ後の整定 (80ms)
-    static const int SAMPLE_TICKS = 10;       // サンプル間隔 (100ms; センサ更新≒10Hz)
     static const int APPROACH_SAMPLES = 5;
 
     // 接近・押し出し
-    static const int APPROACH_PWM = 35;
-    static const int PUSH_PWM = 35;
     static const int HEADING_DIFF_MAX = 10;   // 方位保持の左右差PWM上限
     static const int PULSE_MIN_MM = 30;       // 前進パルス長の下限
     static const int PULSE_MAX_MM = 150;      // 前進パルス長の上限
@@ -120,6 +120,11 @@ private:
     int mMaxDistanceMm;
     int mPushWdeg;
     int mMaxApproachWdeg;
+    int mScanTargetBodyDegPerSec;
+    int mApproachPwm;
+    int mPushPwm;
+    int mSampleTicks;
+    int mScanSampleIntervalTicks;
 
     int mStartLeftCount;
     int mStartRightCount;

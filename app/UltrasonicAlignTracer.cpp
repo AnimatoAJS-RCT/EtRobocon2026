@@ -9,13 +9,23 @@ UltrasonicAlignTracer::UltrasonicAlignTracer(Walker* walker,
                                              const spikeapi::UltrasonicSensor* ultrasonicSensor,
                                              int halfSweepAngleDeg,
                                              int maxDistanceMm,
-                                             int pushDistanceMm)
+                                             int pushDistanceMm,
+                                             int scanTurnDegPerSec,
+                                             int approachPwm,
+                                             int pushPwm,
+                                             int measureHz,
+                                             int scanMeasureHz)
     : mWalker(walker),
       mUltrasonicSensor(ultrasonicSensor),
       mHalfSweepWdeg(static_cast<int>(std::abs(halfSweepAngleDeg) * WHEEL_DEG_PER_BODY_DEG)),
       mMaxDistanceMm(std::max(100, maxDistanceMm)),
       mPushWdeg(static_cast<int>(std::abs(pushDistanceMm) * WHEEL_DEG_PER_MM)),
       mMaxApproachWdeg(static_cast<int>((std::max(100, maxDistanceMm) + 300) * WHEEL_DEG_PER_MM)),
+    mScanTargetBodyDegPerSec(scanTurnDegPerSec),
+    mApproachPwm(approachPwm),
+    mPushPwm(pushPwm),
+    mSampleTicks(100 / measureHz),
+    mScanSampleIntervalTicks(100 / scanMeasureHz),
       mStartLeftCount(0),
       mStartRightCount(0),
       mPhase(TURN_TO_SWEEP_START),
@@ -137,8 +147,10 @@ void UltrasonicAlignTracer::startSearching()
             primeDistance, primeDistance < 0 ? "no-echo" : "ready");
         mReverseSweep = false;
     mState = WALKING;
-        LOGI("[ULTRA_ALIGN] start: half=%d wheelDeg speed=%ddeg/s max=%dmm push=%d wheelDeg\n",
-            mHalfSweepWdeg, SCAN_TARGET_BODY_DEG_PER_SEC, mMaxDistanceMm, mPushWdeg);
+           LOGI("[ULTRA_ALIGN] start: half=%d wheelDeg scan=%ddeg/s max=%dmm push=%d wheelDeg "
+               "approachPwm=%d pushPwm=%d measure=%dHz scanMeasure=%dHz\n",
+               mHalfSweepWdeg, mScanTargetBodyDegPerSec, mMaxDistanceMm, mPushWdeg,
+               mApproachPwm, mPushPwm, 100 / mSampleTicks, 100 / mScanSampleIntervalTicks);
     startSweep(mHalfSweepWdeg, -mHalfSweepWdeg, true);
 }
 
@@ -250,7 +262,7 @@ void UltrasonicAlignTracer::runScanSweep()
             recordHit(distance, turnWdeg);
             mSweepValidSamples++;
         }
-        mSampleWait = SCAN_SAMPLE_INTERVAL_TICKS - 1;
+        mSampleWait = mScanSampleIntervalTicks - 1;
     }
 
     if(driveScanTo(mSweepEndWdeg)) {
@@ -298,7 +310,7 @@ bool UltrasonicAlignTracer::stepMeasurement(int maxSamples)
     if(mSampleAttempts >= maxSamples || mValidCount > 0) {
         return true;
     }
-    mSampleWait = SAMPLE_TICKS;
+    mSampleWait = mSampleTicks;
     return false;
 }
 
@@ -592,7 +604,7 @@ void UltrasonicAlignTracer::runApproachPulse()
         beginMeasurement(APPROACH_SETTLE);
         return;
     }
-    driveForward(APPROACH_PWM);
+    driveForward(mApproachPwm);
 }
 
 void UltrasonicAlignTracer::startRescan()
@@ -636,7 +648,8 @@ void UltrasonicAlignTracer::runBackup()
         int leftBoost = 0;
         int rightBoost = 0;
         updateStall(&leftBoost, &rightBoost);
-        mWalker->runWithEncoderCorrection(-(APPROACH_PWM + leftBoost), -(APPROACH_PWM + rightBoost));
+        mWalker->runWithEncoderCorrection(-(mApproachPwm + leftBoost),
+                           -(mApproachPwm + rightBoost));
         return;
     }
     mWalker->brake();
@@ -658,7 +671,7 @@ void UltrasonicAlignTracer::startPush(int remainingMm)
 {
     mPushStartForwardWdeg = getForwardWdeg();
     mPushTargetWdeg = mPushWdeg + static_cast<int>(remainingMm * WHEEL_DEG_PER_MM);
-    mSampleWait = SAMPLE_TICKS;
+    mSampleWait = mSampleTicks;
     mWalker->beginEncoderCorrection();
     mPhase = PUSHING;
     LOGI("[ULTRA_ALIGN] push begin: %d wheelDeg (remaining=%dmm)\n",
@@ -677,7 +690,7 @@ void UltrasonicAlignTracer::runPush()
         bool hasEcho = false;
         bool inRange = false;
         int distance = readDistanceMm(&hasEcho, &inRange);
-        mSampleWait = SAMPLE_TICKS;
+        mSampleWait = mSampleTicks;
         if(hasEcho && inRange && distance > CONTACT_MM + PUSH_LOST_RISE_MM) {
             LOGI("[ULTRA_ALIGN] push lost: reading=%dmm; backup=%dmm then rescan\n",
                  distance, PUSH_LOST_BACKUP_MM);
@@ -685,7 +698,7 @@ void UltrasonicAlignTracer::runPush()
             return;
         }
     }
-    driveForward(PUSH_PWM);
+    driveForward(mPushPwm);
 }
 
 void UltrasonicAlignTracer::startPushLostRescan()
@@ -762,7 +775,7 @@ bool UltrasonicAlignTracer::driveScanTo(int targetWdeg)
     mScanSpeedTicks++;
     if(mScanSpeedTicks >= SCAN_SPEED_WINDOW_TICKS) {
         int travelled = std::abs(getTurnWdeg() - mScanSpeedStartWdeg);
-        int targetTravel = static_cast<int>(SCAN_TARGET_BODY_DEG_PER_SEC
+        int targetTravel = static_cast<int>(mScanTargetBodyDegPerSec
                                             * WHEEL_DEG_PER_BODY_DEG
                                             * SCAN_SPEED_WINDOW_TICKS / 100.0);
         mScanPwm += (targetTravel - travelled) / 2;
