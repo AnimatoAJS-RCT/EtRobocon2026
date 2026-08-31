@@ -303,9 +303,10 @@ void generateTracerList()
             gRotateTracer->addStarter(gStarter);
             tracerList.push_back(gRotateTracer);
         } else if(spl[0] == "UltrasonicAlignTracer") {
-            if(result_size != 4) {
-                LOGI("UltrasonicAlignTracer requires 3 params: <half_sweep_deg> <max_distance_mm> "
-                     "<push_distance_mm>\n");
+            if(result_size < 4 || result_size > 9) {
+                LOGI("UltrasonicAlignTracer requires 3 to 8 params: <half_sweep_deg> <max_distance_mm> "
+                     "<push_distance_mm> [scan_turn_deg_per_sec] [approach_pwm] [push_pwm] "
+                     "[measure_hz] [scan_measure_hz]\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -315,14 +316,34 @@ void generateTracerList()
             int halfSweepAngleDeg = atoi(spl[1].c_str());
             int maxDistanceMm = atoi(spl[2].c_str());
             int pushDistanceMm = atoi(spl[3].c_str());
+            int scanTurnDegPerSec = result_size >= 5 ? atoi(spl[4].c_str()) : 35;
+            int approachPwm = result_size >= 6 ? atoi(spl[5].c_str()) : 35;
+            int pushPwm = result_size >= 7 ? atoi(spl[6].c_str()) : 35;
+            int measureHz = result_size >= 8 ? atoi(spl[7].c_str()) : 10;
+            int scanMeasureHz = result_size >= 9 ? atoi(spl[8].c_str()) : 33;
+            if(halfSweepAngleDeg <= 0 || maxDistanceMm < 100 || pushDistanceMm < 0
+               || scanTurnDegPerSec < 10 || scanTurnDegPerSec > 90
+               || approachPwm <= 0 || approachPwm > 100 || pushPwm <= 0 || pushPwm > 100
+               || measureHz <= 0 || measureHz > 10 || scanMeasureHz <= 0 || scanMeasureHz > 100) {
+                LOGI("UltrasonicAlignTracer invalid params: half>0, max>=100, push>=0, "
+                     "10<=scan_turn<=90, 1<=pwm<=100, 1<=measure_hz<=10, "
+                     "1<=scan_measure_hz<=100\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
             if(gUltrasonicSensor.hasError()) {
                 LOGI("UltrasonicAlignTracer skipped: ultrasonic sensor is unavailable on PORT_F\n");
             } else {
-                 LOGI("UltrasonicAlignTracer(half=%ddeg, max=%dmm, push=%dmm): push\n",
-                     halfSweepAngleDeg, maxDistanceMm, pushDistanceMm);
+                 LOGI("UltrasonicAlignTracer(half=%ddeg, max=%dmm, push=%dmm, scan=%ddeg/s, "
+                      "approachPwm=%d, pushPwm=%d, measure=%dHz, scanMeasure=%dHz): push\n",
+                      halfSweepAngleDeg, maxDistanceMm, pushDistanceMm, scanTurnDegPerSec,
+                      approachPwm, pushPwm, measureHz, scanMeasureHz);
                 gUltrasonicAlignTracer = new UltrasonicAlignTracer(
                     gWalker, &gUltrasonicSensor, halfSweepAngleDeg, maxDistanceMm,
-                    pushDistanceMm);
+                    pushDistanceMm, scanTurnDegPerSec, approachPwm, pushPwm, measureHz,
+                    scanMeasureHz);
                 gUltrasonicAlignTracer->addStarter(gStarter);
                 tracerList.push_back(gUltrasonicAlignTracer);
             }
