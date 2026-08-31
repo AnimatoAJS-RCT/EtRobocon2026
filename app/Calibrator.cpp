@@ -108,16 +108,21 @@ void Calibrator::execWaitingForStart()
 
 void Calibrator::execSettingCourse()
 {
-    mLight.turnOnColor(IS_LEFT_COURSE ? spikeapi::Light::EColor::RED
-                                      : spikeapi::Light::EColor::BLUE);
     if(mButton.isLeftPressed()) {
         IS_LEFT_COURSE = true;
         LOGI("[CAL] course: %s\n", IS_LEFT_COURSE ? "LEFT" : "RIGHT");
     } else if(mButton.isRightPressed()) {
         IS_LEFT_COURSE = false;
         LOGI("[CAL] course: %s\n", IS_LEFT_COURSE ? "LEFT" : "RIGHT");
-    } else if(mButton.isCenterPressed()) {
+    }
+
+    mLight.turnOnColor(IS_LEFT_COURSE ? spikeapi::Light::EColor::RED
+                                      : spikeapi::Light::EColor::BLUE);
+    mDisplay.showChar(IS_LEFT_COURSE ? 'L' : 'R');
+
+    if(mButton.isCenterPressed()) {
         LOGI("[CAL] course confirmed: %s\n", IS_LEFT_COURSE ? "LEFT" : "RIGHT");
+        mPressPending = false;
         mState = CALIBRATING_BLACK;
     }
 }

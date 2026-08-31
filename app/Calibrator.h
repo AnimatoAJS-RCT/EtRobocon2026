@@ -5,6 +5,7 @@
 #include "ForceSensor.h"
 #include "Light.h"
 #include "Button.h"
+#include "Display.h"
 
 class Calibrator {
 public:
@@ -41,6 +42,7 @@ private:
     const spikeapi::ForceSensor& mForceSensor;
     spikeapi::Light& mLight;
     spikeapi::Button mButton;
+    spikeapi::Display mDisplay;
     int mBlack = 0;
     int mWhite = 100;
     bool mIsInitialized = false;
