@@ -249,8 +249,8 @@ void generateTracerList()
             }
             tracerList.push_back(gLineTracer);
         } else if(spl[0] == "ArmTracer") {
-            if(result_size < 3) {
-                LOGI("ArmTracer requires 2 params: ArmTracer <pwm> <target_angle_deg>\n");
+            if(result_size != 4) {
+                LOGI("ArmTracer requires 3 params: ArmTracer <pwm> <UP|DOWN> <target_angle_deg>\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -258,9 +258,29 @@ void generateTracerList()
             }
 
             int armPwm = atoi(spl[1].c_str());
-            int targetAngle = atoi(spl[2].c_str());
-            LOGI("ArmTracer(%d, %ddeg): push\n", armPwm, targetAngle);
-            gArmTracer = new ArmTracer(&gArmMotor, armPwm, targetAngle);
+            int direction = 0;
+            if(spl[2] == "UP") {
+                direction = -1;
+            } else if(spl[2] == "DOWN") {
+                direction = 1;
+            } else {
+                LOGI("ArmTracer direction must be UP or DOWN: %s\n", spl[2].c_str());
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+            int targetAngle = atoi(spl[3].c_str());
+            if(armPwm <= 0 || armPwm > 100 || targetAngle <= 0) {
+                LOGI("ArmTracer requires 0 < pwm <= 100 and target_angle_deg > 0\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+            LOGI("ArmTracer(pwm=%d, direction=%s, target=%ddeg): push\n", armPwm,
+                 spl[2].c_str(), targetAngle);
+            gArmTracer = new ArmTracer(&gArmMotor, armPwm, direction, targetAngle);
             gArmTracer->addStarter(gStarter);
             tracerList.push_back(gArmTracer);
         } else if(spl[0] == "RotateTracer") {
@@ -275,9 +295,9 @@ void generateTracerList()
 
             int direction = 0;
             if(spl[1] == "TURN_RIGHT") {
-                direction = 1;
-            } else if(spl[1] == "TURN_LEFT") {
                 direction = -1;
+            } else if(spl[1] == "TURN_LEFT") {
+                direction = 1;
             } else {
                 LOGI("RotateTracer direction must be TURN_LEFT or TURN_RIGHT: %s\n",
                      spl[1].c_str());
@@ -297,8 +317,13 @@ void generateTracerList()
                 continue;
             }
 
-            LOGI("RotateTracer(direction=%s, angle=%ddeg, pwm=%d): push\n",
-                 spl[1].c_str(), angleDeg, pwm);
+            // tracer.iniはRコース基準。Lコースでは線対称になるよう回転方向を反転する。
+            if(IS_LEFT_COURSE) {
+                direction = -direction;
+            }
+
+            LOGI("RotateTracer(requested=%s, actual=%s, angle=%ddeg, pwm=%d): push\n",
+                  spl[1].c_str(), direction < 0 ? "TURN_RIGHT" : "TURN_LEFT", angleDeg, pwm);
             gRotateTracer = new RotateTracer(gWalker, direction, angleDeg, pwm);
             gRotateTracer->addStarter(gStarter);
             tracerList.push_back(gRotateTracer);
