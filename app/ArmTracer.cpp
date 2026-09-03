@@ -2,10 +2,11 @@
 
 #include "Log.h"
 
-ArmTracer::ArmTracer(spikeapi::Motor* armMotor, int armPwm, int targetAngle)
+ArmTracer::ArmTracer(spikeapi::Motor* armMotor, int armPwm, int direction, int targetAngle)
     : mArmMotor(armMotor),
       mArmPwm(armPwm),
-    mTargetAngle(targetAngle),
+            mDirection(direction),
+            mTargetAngle(targetAngle),
     mStartCount(0),
       mIsInitialized(false)
 {
@@ -41,7 +42,7 @@ void ArmTracer::run()
             }
             break;
         case WALKING: {
-            mArmMotor->setPower(mArmPwm);
+            mArmMotor->setPower(mDirection * mArmPwm);
 
             for(auto terminator : mTerminatorList) {
                 if(terminator->isToBeTerminate()) {
@@ -53,19 +54,19 @@ void ArmTracer::run()
                 }
             }
 
-            int movedAngle = mArmMotor->getCount() - mStartCount;
-            bool isTargetReached = (mTargetAngle >= 0) ? (movedAngle >= mTargetAngle)
-                                                       : (movedAngle <= mTargetAngle);
+              int movedAngle = mArmMotor->getCount() - mStartCount;
+              int directedAngle = mDirection * movedAngle;
+              bool isTargetReached = directedAngle >= mTargetAngle;
             if(isTargetReached) {
                 mArmMotor->brake();
                 mState = TERMINATED;
-                LOGI("[ARM] completed (pwm=%d, target=%ddeg, moved=%ddeg)\n", mArmPwm,
-                     mTargetAngle, movedAngle);
+                 LOGI("[ARM] completed (pwm=%d, direction=%s, target=%ddeg, moved=%ddeg)\n",
+                     mArmPwm, mDirection > 0 ? "DOWN" : "UP", mTargetAngle, movedAngle);
             } else if(mArmMotor->isStalled()) {
                 mArmMotor->brake();
                 mState = TERMINATED;
-                LOGI("[ARM] stalled (pwm=%d, target=%ddeg, moved=%ddeg)\n", mArmPwm,
-                     mTargetAngle, movedAngle);
+                 LOGI("[ARM] stalled (pwm=%d, direction=%s, target=%ddeg, moved=%ddeg)\n",
+                     mArmPwm, mDirection > 0 ? "DOWN" : "UP", mTargetAngle, movedAngle);
             }
             break;
             }
