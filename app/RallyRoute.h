@@ -14,7 +14,9 @@
 #define RALLY_ROUTE_H
 
 #include <cstddef>
+#include <cstdio>
 #include <vector>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // QRコード座標
@@ -40,6 +42,12 @@ struct QRPos {
     }
     bool operator!=(const QRPos& other) const {
         return !(*this == other);
+    }
+
+    std::string toString() const {
+        char buffer[32];
+        std::snprintf(buffer, sizeof(buffer), "Q(%d,%d)", x, y);
+        return std::string(buffer);
     }
 };
 
@@ -154,6 +162,11 @@ struct RouteStep {
         step.returnPos = realBase;
         return step;
     }
+
+    std::string toString() const {
+        return destination.toString();
+    }
+
 };
 
 // ---------------------------------------------------------------------------
@@ -196,6 +209,26 @@ public:
 
     /** @brief 全ステップへの読み取り専用参照を返す */
     const std::vector<RouteStep>& steps() const { return mSteps; }
+
+    /** @brief 経路をステップ単位の文字列に変換する */
+    std::string toString() const {
+        std::string result = "route has " + std::to_string(mSteps.size()) + " steps:\n";
+        char buffer[96];
+        for (std::size_t i = 0; i < mSteps.size(); i++) {
+            const RouteStep& step = mSteps[i];
+            if (step.type == RouteStepType::MOVE) {
+                std::snprintf(buffer, sizeof(buffer), "  [%2u] MOVE         %s\n",
+                              static_cast<unsigned>(i), step.destination.toString().c_str());
+            } else {
+                std::snprintf(buffer, sizeof(buffer),
+                              "  [%2u] VIRTUAL_DETOUR%s then back to %s\n",
+                              static_cast<unsigned>(i), step.destination.toString().c_str(),
+                              step.returnPos.toString().c_str());
+            }
+            result += buffer;
+        }
+        return result;
+    }
 
 private:
     std::vector<RouteStep> mSteps;

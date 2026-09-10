@@ -3,7 +3,7 @@
  * @brief RallyRouteSolver の単体テスト（SPIKE-RT 不要・g++ でそのまま実行可能）
  *
  * コンパイル:
- *   g++ -std=c++14 -I../app -o test_solver test_solver.cpp ../app/RallyRoute.cpp ../app/RallyRouteSolver.cpp
+ *   g++ -std=c++14 -I../app -o test_solver test_solver.cpp
  *
  * 実行:
  *   ./test_solver
@@ -59,23 +59,6 @@ static int gFailCount = 0;
                         __FILE__, __LINE__, #a, #b, (int)(a), (int)(b));        \
         }                                                                       \
     } while(0)
-
-// 経路の内容を表示するデバッグヘルパー
-static void printRoute(const RallyRoute& route)
-{
-    std::printf("  route has %u steps:\n", static_cast<unsigned>(route.size()));
-    for(std::size_t i = 0; i < route.size(); i++) {
-        const RouteStep& s = route[i];
-        if(s.type == RouteStepType::MOVE) {
-            std::printf("    [%2zu] MOVE         → (%d,%d)\n",
-                        i, s.destination.x, s.destination.y);
-        } else {
-            std::printf("    [%2zu] VIRTUAL_DETOUR→ (%d,%d) then back to (%d,%d)\n",
-                        i, s.destination.x, s.destination.y,
-                        s.returnPos.x, s.returnPos.y);
-        }
-    }
-}
 
 // from → to の移動が指定ゲートを通過するか判定する
 // ゲートバーは 1 セルの辺のため、通過できる QR は 1 点のみ
@@ -187,7 +170,7 @@ static void test_sampleGates_1lap()
     cfg.lapCount = 1;
 
     RallyRoute route = RallyRouteSolver::solve(gates, cfg);
-    printRoute(route);
+    std::printf("%s", route.toString().c_str());
 
     EXPECT_TRUE(!route.isEmpty());
     EXPECT_TRUE(routeQRsAreValid(route));
@@ -213,7 +196,7 @@ static void test_sampleGates_3laps()
     cfg.lapCount = 3;
 
     RallyRoute route = RallyRouteSolver::solve(gates, cfg);
-    printRoute(route);
+    std::printf("%s", route.toString().c_str());
 
     EXPECT_TRUE(!route.isEmpty());
     EXPECT_TRUE(routeQRsAreValid(route));
@@ -241,7 +224,7 @@ static void test_interiorGatesOnly()
     cfg.lapCount = 1;
 
     RallyRoute route = RallyRouteSolver::solve(gates, cfg);
-    printRoute(route);
+    std::printf("%s", route.toString().c_str());
 
     EXPECT_TRUE(!route.isEmpty());
     EXPECT_TRUE(routeQRsAreValid(route));
@@ -269,7 +252,7 @@ static void test_bottomLeftEdgeGates()
     cfg.lapCount = 1;
 
     RallyRoute route = RallyRouteSolver::solve(gates, cfg);
-    printRoute(route);
+    std::printf("%s", route.toString().c_str());
 
     EXPECT_TRUE(!route.isEmpty());
     EXPECT_TRUE(routeQRsAreValid(route));
@@ -295,7 +278,7 @@ static void test_startOnApproach()
     cfg.lapCount = 1;
 
     RallyRoute route = RallyRouteSolver::solve(gates, cfg);
-    printRoute(route);
+    std::printf("%s", route.toString().c_str());
 
     EXPECT_TRUE(!route.isEmpty());
     EXPECT_TRUE(routeQRsAreValid(route));

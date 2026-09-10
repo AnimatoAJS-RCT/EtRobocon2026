@@ -56,7 +56,7 @@ public:
 
     /// 車体 1 度旋回に必要なホイール回転角（右輪-左輪の平均変化量）
     /// UltrasonicAlignTracer と同じ 14/9 ≈ 1.556 を使用
-    static constexpr double WHEEL_DEGREES_PER_BODY_DEGREE = 2.115;
+    static constexpr double WHEEL_DEGREES_PER_BODY_DEGREE = 2.106;
 
     /// 旋回完了の許容誤差 [ホイール度]
     static const int TURN_TOLERANCE = 1;
