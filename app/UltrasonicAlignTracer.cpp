@@ -61,6 +61,8 @@ UltrasonicAlignTracer::UltrasonicAlignTracer(Walker* walker,
     mTargetVerifyAttempted(false),
       mRescanAttempts(0),
       mCreepAttempts(0),
+            mCreepStartForwardWdeg(0),
+            mCreepTargetWdeg(0),
       mBackupStartForwardWdeg(0),
       mBackupTargetWdeg(0),
       mPendingRescanHalfWdeg(0),
@@ -110,6 +112,16 @@ void UltrasonicAlignTracer::run()
                     break;
                 case APPROACH_PULSE:
                     runApproachPulse();
+                    break;
+                case CREEP_TURN:
+                    if(driveTurnTo(0, TURN_PWM_MAX)) {
+                        mCreepStartForwardWdeg = getForwardWdeg();
+                        mWalker->beginEncoderCorrection();
+                        mPhase = CREEPING;
+                    }
+                    break;
+                case CREEPING:
+                    runCreep();
                     break;
                 case BACKING:
                     runBackup();
@@ -481,6 +493,21 @@ void UltrasonicAlignTracer::startCreep()
         return;
     }
     mCreepAttempts++;
+    int creepMm = CREEP_INITIAL_MM + (mCreepAttempts - 1) * CREEP_INCREMENT_MM;
+    mCreepTargetWdeg = static_cast<int>(creepMm * WHEEL_DEG_PER_MM);
+    mTargetTurnWdeg = 0;
+    mPhase = CREEP_TURN;
+    LOGI("[ULTRA_ALIGN] creep: attempt=%d forward=%dmm\n", mCreepAttempts, creepMm);
+}
+
+void UltrasonicAlignTracer::runCreep()
+{
+    int travelled = getForwardWdeg() - mCreepStartForwardWdeg;
+    if(travelled < mCreepTargetWdeg) {
+        driveForward(mApproachPwm);
+        return;
+    }
+    mWalker->brake();
     int expandedHalfWdeg = std::min(
         static_cast<int>(MAX_SWEEP_HALF_BODY_DEG * WHEEL_DEG_PER_BODY_DEG),
         mHalfSweepWdeg + static_cast<int>(mCreepAttempts * 30 * WHEEL_DEG_PER_BODY_DEG));

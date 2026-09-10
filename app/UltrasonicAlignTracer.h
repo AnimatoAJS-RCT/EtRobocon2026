@@ -42,6 +42,8 @@ private:
         APPROACH_SETTLE,
         APPROACH_SAMPLE,
         APPROACH_PULSE,
+        CREEP_TURN,
+        CREEPING,
         BACKING,
         PUSHING,
         RETURNING,
@@ -100,8 +102,10 @@ private:
     static const int RESCAN_STANDOFF_MM = 150;
     static const int RESCAN_BACKUP_MAX_MM = 50;
 
-    // 未検出時は前進せず、同じ位置で探索範囲だけを段階的に拡大する。
+    // 初期探索で未検出なら、開始方位へ戻って段階的に前進して探索範囲を拡大する。
     static const int MAX_CREEP_ATTEMPTS = 2;
+    static const int CREEP_INITIAL_MM = 100;
+    static const int CREEP_INCREMENT_MM = 50;
     static const int MAX_SWEEP_HALF_BODY_DEG = 90;
     static const int PUSH_LOST_BACKUP_MM = 100;
 
@@ -173,6 +177,8 @@ private:
     bool mTargetVerifyAttempted;
     int mRescanAttempts;
     int mCreepAttempts;
+    int mCreepStartForwardWdeg;
+    int mCreepTargetWdeg;
     int mBackupStartForwardWdeg;
     int mBackupTargetWdeg;
     int mPendingRescanHalfWdeg;
@@ -212,6 +218,7 @@ private:
     void startPushLostRescan();
     void startRescan();
     void doRescanSweep();
+    void runCreep();
     void runBackup();
     void startCreep();
     void resetHistogram();

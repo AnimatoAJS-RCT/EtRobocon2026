@@ -189,7 +189,8 @@ void generateTracerList()
                 }
 
                 if(hasStopColor) {
-                    gColorTerminator = new ColorTerminator(&gColorSensor, stopColor);
+                    gColorTerminator = new ColorTerminator(&gColorSensor, stopColor,
+                                                            gCalibrator->getBlack());
                     gScenarioTracer->addTerminator(gColorTerminator);
                 }
             }
