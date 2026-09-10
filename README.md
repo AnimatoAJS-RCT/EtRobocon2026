@@ -52,6 +52,73 @@ make app=EtRobocon2026 sim
 3. トレーサ周期タスクで `tracerList` を順に実行
 4. 各トレーサが終端条件を満たすと次へ遷移
 
+## ETラリー設計方針
+
+ETラリーは、経路生成と走行制御を分離して設計しています。
+
+- 経路生成: RallyRouteSolver
+- 走行制御: RallyTracer
+
+### 座標系と前提
+
+- ゲート座標は 5x5 グリッド（1..5）
+- QR 座標は 4x4 グリッド（1..4）
+- QR はゲートグリッドの交点ではなく、各セル中央に配置される
+- そのため 1 本のゲートバーに対して、通過できる QR ルートは 1 本だけ
+	- 逆方向を含めると 2 パターン
+
+### 外周ゲートの扱い
+
+- 外周ゲート（x=1/5, y=1/5）を通過するため、仮想 QR（0 または 5）を導入
+- 経路上では以下の 1 ステップとして表現
+	- VIRTUAL_DETOUR: 仮想 QR へ前進して通過し、即座に元の実 QR へ後退
+
+### ソルバーの方針
+
+- 赤 → 青 → 黄の順を 1 周として、最大 3 周まで経路を生成
+- QR グリッド上の移動は上下左右の 4 方向のみ
+- 最短経路探索は BFS
+- 候補選択の距離評価はマンハッタン距離
+
+### トレーサの方針
+
+- 現在実装はデッドレコニング（エンコーダ）ベース
+- QR 読み取りや QR 識別は行わない
+- RallyRoute の各ステップを 旋回 → 前進（必要なら後退）で実行
+- オプションで床面の黒マーカ検出（反射光）による位置補正を利用可能
+	- QRデコードは行わず、黒パターンを「位置合わせイベント」として使う
+
+### Lコース対応
+
+- IS_LEFT_COURSE が true の場合、RallyTracer 入力を左右反転してから経路生成
+	- QR の x: x' = 5 - x
+	- Gate の gx: gx' = 6 - gx
+	- 方位角: heading' = (180 - heading) mod 360
+
+### tracer.ini 設定
+
+`RallyTracer` は従来どおりゲート位置から `RallyRouteSolver` で経路を生成します。
+
+RallyTracer movePwm turnPwm startX startY startHeading lapCount red_gx1 red_gy1 red_gx2 red_gy2 blue_gx1 blue_gy1 blue_gx2 blue_gy2 yellow_gx1 yellow_gy1 yellow_gx2 yellow_gy2 [endX endY endHeading]
+
+`endX endY endHeading` を指定すると、ソルバー経路の終了後にその QR 座標まで移動し、指定方位へ旋回して停止します。
+
+指定した経路をそのまま走らせる場合は、`RallyRouteTracer` を使用します。開始位置の後に、走行先 QR 座標を順に並べます。
+
+RallyRouteTracer movePwm turnPwm startX startY startHeading routeX1 routeY1 [routeX2 routeY2 ...] [endX endY endHeading]
+
+`endX endY endHeading` を指定すると、座標列の終了後にその QR 座標まで移動し、指定方位へ旋回して停止します。
+
+- 実在する QR 座標は `1..4` です。
+- 外周ゲートを通過する場合は、外周側の座標 `0` または `5` を指定します。走行体は通過後、直前の実在 QR 座標へ後退して戻ります。
+
+startHeading は次の方位角定義を使います。
+
+- 0: 東
+- 90: 北
+- 180: 西
+- 270: 南
+
 ## 設定と拡張ポイント
 
 - 走行シーケンス定義: `app.cpp` の `generateTracerList()`
