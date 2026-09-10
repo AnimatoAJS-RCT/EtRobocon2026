@@ -9,7 +9,7 @@
 #include "DistanceTerminator.h"
 #include "Log.h"
 
-const double DistanceTerminator::TIRE_DIAMETER = 5.5;
+const double DistanceTerminator::TIRE_DIAMETER = 55.0;
 const double DistanceTerminator::PI = 3.1415926535;
 
 /**

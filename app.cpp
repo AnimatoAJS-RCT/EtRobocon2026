@@ -255,8 +255,8 @@ void generateTracerList()
             }
             tracerList.push_back(gLineTracer);
         } else if(spl[0] == "ArmTracer") {
-            if(result_size < 3) {
-                LOGI("ArmTracer requires 2 params: ArmTracer <pwm> <target_angle_deg>\n");
+            if(result_size != 4) {
+                LOGI("ArmTracer requires 3 params: ArmTracer <pwm> <UP|DOWN> <target_angle_deg>\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -264,9 +264,29 @@ void generateTracerList()
             }
 
             int armPwm = atoi(spl[1].c_str());
-            int targetAngle = atoi(spl[2].c_str());
-            LOGI("ArmTracer(%d, %ddeg): push\n", armPwm, targetAngle);
-            gArmTracer = new ArmTracer(&gArmMotor, armPwm, targetAngle);
+            int direction = 0;
+            if(spl[2] == "UP") {
+                direction = -1;
+            } else if(spl[2] == "DOWN") {
+                direction = 1;
+            } else {
+                LOGI("ArmTracer direction must be UP or DOWN: %s\n", spl[2].c_str());
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+            int targetAngle = atoi(spl[3].c_str());
+            if(armPwm <= 0 || armPwm > 100 || targetAngle <= 0) {
+                LOGI("ArmTracer requires 0 < pwm <= 100 and target_angle_deg > 0\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+            LOGI("ArmTracer(pwm=%d, direction=%s, target=%ddeg): push\n", armPwm,
+                 spl[2].c_str(), targetAngle);
+            gArmTracer = new ArmTracer(&gArmMotor, armPwm, direction, targetAngle);
             gArmTracer->addStarter(gStarter);
             tracerList.push_back(gArmTracer);
         } else if(spl[0] == "RotateTracer") {
@@ -281,9 +301,9 @@ void generateTracerList()
 
             int direction = 0;
             if(spl[1] == "TURN_RIGHT") {
-                direction = 1;
-            } else if(spl[1] == "TURN_LEFT") {
                 direction = -1;
+            } else if(spl[1] == "TURN_LEFT") {
+                direction = 1;
             } else {
                 LOGI("RotateTracer direction must be TURN_LEFT or TURN_RIGHT: %s\n",
                      spl[1].c_str());
@@ -303,15 +323,21 @@ void generateTracerList()
                 continue;
             }
 
-            LOGI("RotateTracer(direction=%s, angle=%ddeg, pwm=%d): push\n",
-                 spl[1].c_str(), angleDeg, pwm);
+            // tracer.iniはRコース基準。Lコースでは線対称になるよう回転方向を反転する。
+            if(IS_LEFT_COURSE) {
+                direction = -direction;
+            }
+
+            LOGI("RotateTracer(requested=%s, actual=%s, angle=%ddeg, pwm=%d): push\n",
+                  spl[1].c_str(), direction < 0 ? "TURN_RIGHT" : "TURN_LEFT", angleDeg, pwm);
             gRotateTracer = new RotateTracer(gWalker, direction, angleDeg, pwm);
             gRotateTracer->addStarter(gStarter);
             tracerList.push_back(gRotateTracer);
         } else if(spl[0] == "UltrasonicAlignTracer") {
-            if(result_size != 4) {
-                LOGI("UltrasonicAlignTracer requires 3 params: <half_sweep_deg> <max_distance_mm> "
-                     "<push_distance_mm>\n");
+            if(result_size < 4 || result_size > 9) {
+                LOGI("UltrasonicAlignTracer requires 3 to 8 params: <half_sweep_deg> <max_distance_mm> "
+                     "<push_distance_mm> [scan_turn_deg_per_sec] [approach_pwm] [push_pwm] "
+                     "[measure_hz] [scan_measure_hz]\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -321,14 +347,34 @@ void generateTracerList()
             int halfSweepAngleDeg = atoi(spl[1].c_str());
             int maxDistanceMm = atoi(spl[2].c_str());
             int pushDistanceMm = atoi(spl[3].c_str());
+            int scanTurnDegPerSec = result_size >= 5 ? atoi(spl[4].c_str()) : 35;
+            int approachPwm = result_size >= 6 ? atoi(spl[5].c_str()) : 35;
+            int pushPwm = result_size >= 7 ? atoi(spl[6].c_str()) : 35;
+            int measureHz = result_size >= 8 ? atoi(spl[7].c_str()) : 10;
+            int scanMeasureHz = result_size >= 9 ? atoi(spl[8].c_str()) : 33;
+            if(halfSweepAngleDeg <= 0 || maxDistanceMm < 100 || pushDistanceMm < 0
+               || scanTurnDegPerSec < 10 || scanTurnDegPerSec > 90
+               || approachPwm <= 0 || approachPwm > 100 || pushPwm <= 0 || pushPwm > 100
+               || measureHz <= 0 || measureHz > 10 || scanMeasureHz <= 0 || scanMeasureHz > 100) {
+                LOGI("UltrasonicAlignTracer invalid params: half>0, max>=100, push>=0, "
+                     "10<=scan_turn<=90, 1<=pwm<=100, 1<=measure_hz<=10, "
+                     "1<=scan_measure_hz<=100\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
             if(gUltrasonicSensor.hasError()) {
                 LOGI("UltrasonicAlignTracer skipped: ultrasonic sensor is unavailable on PORT_F\n");
             } else {
-                 LOGI("UltrasonicAlignTracer(half=%ddeg, max=%dmm, push=%dmm): push\n",
-                     halfSweepAngleDeg, maxDistanceMm, pushDistanceMm);
+                 LOGI("UltrasonicAlignTracer(half=%ddeg, max=%dmm, push=%dmm, scan=%ddeg/s, "
+                      "approachPwm=%d, pushPwm=%d, measure=%dHz, scanMeasure=%dHz): push\n",
+                      halfSweepAngleDeg, maxDistanceMm, pushDistanceMm, scanTurnDegPerSec,
+                      approachPwm, pushPwm, measureHz, scanMeasureHz);
                 gUltrasonicAlignTracer = new UltrasonicAlignTracer(
                     gWalker, &gUltrasonicSensor, halfSweepAngleDeg, maxDistanceMm,
-                    pushDistanceMm);
+                    pushDistanceMm, scanTurnDegPerSec, approachPwm, pushPwm, measureHz,
+                    scanMeasureHz);
                 gUltrasonicAlignTracer->addStarter(gStarter);
                 tracerList.push_back(gUltrasonicAlignTracer);
             }
