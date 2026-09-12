@@ -21,13 +21,16 @@ class ColorTerminator : public Terminator {
      * @param colorSensor ColorSensor
      * @param termColor 停止する色
      */
-    ColorTerminator(const spikeapi::ColorSensor* colorSensor, const eColor termColor);
+    ColorTerminator(const spikeapi::ColorSensor* colorSensor, const eColor termColor,
+                    int calibratedBlackReflection = -1);
 
     bool isToBeTerminate();
 
    private:
     const spikeapi::ColorSensor* mColorSensor;
     const eColor mTermColor;
+    static const int BLACK_REFLECTION_TOLERANCE = 8;
+    int mCalibratedBlackReflection;
     int mLogCounter;
     bool mHasLastLoggedColor;
     eColor mLastLoggedColor;
