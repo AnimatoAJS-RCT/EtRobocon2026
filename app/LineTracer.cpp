@@ -59,6 +59,12 @@ void LineTracer::run()
     }
 }
 
+void LineTracer::runStraight(int leftPwm, int rightPwm)
+{
+    mWalker->setPwm(leftPwm, rightPwm);
+    mWalker->run();
+}
+
 void LineTracer::setTargetBrightness(int targetBrightness)
 {
     mTargetBrightness = targetBrightness;

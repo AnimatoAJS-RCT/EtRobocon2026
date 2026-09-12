@@ -23,6 +23,7 @@ public:
 
     bool isToBeTerminate();
     void init() override;
+    void setTargetDistance(double targetDistance);
 
 private:
     double calcCurrentDistance();

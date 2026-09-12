@@ -40,6 +40,7 @@ public:
                PidGain *_gain);
 
     void run();
+    void runStraight(int leftPwm, int rightPwm);
     void setTargetBrightness(int targetBrightness);
     int getNormalizedTargetBrightness() const;
 
