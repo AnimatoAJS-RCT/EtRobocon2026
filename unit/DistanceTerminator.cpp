@@ -9,6 +9,8 @@
 #include "DistanceTerminator.h"
 #include "Log.h"
 
+#include <cmath>
+
 const double DistanceTerminator::TIRE_DIAMETER = 55.0;
 const double DistanceTerminator::PI = 3.1415926535;
 
@@ -31,7 +33,7 @@ void DistanceTerminator::init()
 
 bool DistanceTerminator::isToBeTerminate()
 {
-    double currentDistance = calcCurrentDistance() - mInitialDistance;
+    double currentDistance = std::abs(calcCurrentDistance() - mInitialDistance);
     bool isTerminate = currentDistance >= mTargetDistance;
 
     if(isTerminate) {
