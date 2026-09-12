@@ -16,8 +16,6 @@ private:
      int mStartLeftCount;
      int mStartRightCount;
     bool mIsInitialized;
-    static const double Kp;                          // Pゲイン
-    static const double PWM_CORRECTION_LIMIT_RATIO;  // PWM補正値のクリッピング割合
     int mLastLoggedState;
 
     void execWalking();

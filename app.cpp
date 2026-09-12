@@ -16,9 +16,14 @@
 #include "LineMonitor.h"
 #include "LineTracer.h"
 #include "ArmTracer.h"
+#include "RotateTracer.h"
 #include "ScenarioTracer.h"
 #include "UltrasonicAlignTracer.h"
 #include "BottleDeliveryTracer.h"
+#include "UltrasonicDistanceLoggerTracer.h"
+#include "UltrasonicProbeTracer.h"
+#include "RallyRouteSolver.h"
+#include "RallyTracer.h"
 #include "Walker.h"
 #include "DistanceTerminator.h"
 #include "ColorTerminator.h"
@@ -70,9 +75,13 @@ static LineMonitor* gLineMonitor;
 static Walker* gWalker;
 static LineTracer* gLineTracer;
 static ArmTracer* gArmTracer;
+static RotateTracer* gRotateTracer;
 static ScenarioTracer* gScenarioTracer;
 static UltrasonicAlignTracer* gUltrasonicAlignTracer;
 static BottleDeliveryTracer* gBottleDeliveryTracer;
+static UltrasonicDistanceLoggerTracer* gUltrasonicDistanceLoggerTracer;
+static UltrasonicProbeTracer* gUltrasonicProbeTracer;
+static RallyTracer* gRallyTracer;
 static Starter* gStarter;
 static DistanceTerminator* gDistanceTerminator;
 static ColorTerminator* gColorTerminator;
@@ -93,8 +102,20 @@ static const char* tracerTypeName(const Tracer* tracer)
     if(dynamic_cast<const ArmTracer*>(tracer) != nullptr) {
         return "ArmTracer";
     }
+    if(dynamic_cast<const RotateTracer*>(tracer) != nullptr) {
+        return "RotateTracer";
+    }
     if(dynamic_cast<const UltrasonicAlignTracer*>(tracer) != nullptr) {
         return "UltrasonicAlignTracer";
+    }
+    if(dynamic_cast<const UltrasonicDistanceLoggerTracer*>(tracer) != nullptr) {
+        return "UltrasonicDistanceLoggerTracer";
+    }
+    if(dynamic_cast<const UltrasonicProbeTracer*>(tracer) != nullptr) {
+        return "UltrasonicProbeTracer";
+    }
+    if(dynamic_cast<const RallyTracer*>(tracer) != nullptr) {
+        return "RallyTracer";
     }
 
     return "UnknownTracer";
@@ -177,7 +198,8 @@ void generateTracerList()
                 }
 
                 if(hasStopColor) {
-                    gColorTerminator = new ColorTerminator(&gColorSensor, stopColor);
+                    gColorTerminator = new ColorTerminator(&gColorSensor, stopColor,
+                                                            gCalibrator->getBlack());
                     gScenarioTracer->addTerminator(gColorTerminator);
                 }
             }
@@ -237,8 +259,8 @@ void generateTracerList()
             }
             tracerList.push_back(gLineTracer);
         } else if(spl[0] == "ArmTracer") {
-            if(result_size < 3) {
-                LOGI("ArmTracer は 2 つの引数が必要です: ArmTracer <pwm> <target_angle_deg>\n");
+            if(result_size != 4) {
+                LOGI("ArmTracer requires 3 params: ArmTracer <pwm> <UP|DOWN> <target_angle_deg>\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -246,15 +268,80 @@ void generateTracerList()
             }
 
             int armPwm = atoi(spl[1].c_str());
-            int targetAngle = atoi(spl[2].c_str());
-            LOGI("ArmTracer(%d, %ddeg): 登録\n", armPwm, targetAngle);
-            gArmTracer = new ArmTracer(&gArmMotor, armPwm, targetAngle);
+            int direction = 0;
+            if(spl[2] == "UP") {
+                direction = -1;
+            } else if(spl[2] == "DOWN") {
+                direction = 1;
+            } else {
+                LOGI("ArmTracer direction must be UP or DOWN: %s\n", spl[2].c_str());
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+            int targetAngle = atoi(spl[3].c_str());
+            if(armPwm <= 0 || armPwm > 100 || targetAngle <= 0) {
+                LOGI("ArmTracer requires 0 < pwm <= 100 and target_angle_deg > 0\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+            LOGI("ArmTracer(pwm=%d, direction=%s, target=%ddeg): push\n", armPwm,
+                 spl[2].c_str(), targetAngle);
+            gArmTracer = new ArmTracer(&gArmMotor, armPwm, direction, targetAngle);
             gArmTracer->addStarter(gStarter);
             tracerList.push_back(gArmTracer);
+        } else if(spl[0] == "RotateTracer") {
+            if(result_size != 4) {
+                LOGI("RotateTracer requires 3 params: RotateTracer <TURN_LEFT|TURN_RIGHT> "
+                     "<angle_deg> <pwm>\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            int direction = 0;
+            if(spl[1] == "TURN_RIGHT") {
+                direction = -1;
+            } else if(spl[1] == "TURN_LEFT") {
+                direction = 1;
+            } else {
+                LOGI("RotateTracer direction must be TURN_LEFT or TURN_RIGHT: %s\n",
+                     spl[1].c_str());
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            int angleDeg = atoi(spl[2].c_str());
+            int pwm = atoi(spl[3].c_str());
+            if(angleDeg <= 0 || pwm <= 0 || pwm > 100) {
+                LOGI("RotateTracer requires angle_deg > 0 and 0 < pwm <= 100\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            // tracer.iniはRコース基準。Lコースでは線対称になるよう回転方向を反転する。
+            if(IS_LEFT_COURSE) {
+                direction = -direction;
+            }
+
+            LOGI("RotateTracer(requested=%s, actual=%s, angle=%ddeg, pwm=%d): push\n",
+                  spl[1].c_str(), direction < 0 ? "TURN_RIGHT" : "TURN_LEFT", angleDeg, pwm);
+            gRotateTracer = new RotateTracer(gWalker, direction, angleDeg, pwm);
+            gRotateTracer->addStarter(gStarter);
+            tracerList.push_back(gRotateTracer);
         } else if(spl[0] == "UltrasonicAlignTracer") {
-            if(result_size < 6) {
-                LOGI("UltrasonicAlignTracer には 5 つの引数が必要です: <half_sweep_deg> <turn_pwm> "
-                     "<step_deg> <sample_count> <max_distance_mm>\n");
+            if(result_size < 4 || result_size > 9) {
+                LOGI("UltrasonicAlignTracer requires 3 to 8 params: <half_sweep_deg> <max_distance_mm> "
+                     "<push_distance_mm> [scan_turn_deg_per_sec] [approach_pwm] [push_pwm] "
+                     "[measure_hz] [scan_measure_hz]\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -262,66 +349,266 @@ void generateTracerList()
             }
 
             int halfSweepAngleDeg = atoi(spl[1].c_str());
-            int turnPwm = atoi(spl[2].c_str());
-            int stepAngleDeg = atoi(spl[3].c_str());
-            int sampleCount = atoi(spl[4].c_str());
-            int maxDistanceMm = atoi(spl[5].c_str());
-            double wheelDegreesPerBodyDegree = result_size >= 7 ? atof(spl[6].c_str()) : 14.0 / 9.0;
-            int centerBandMm = result_size >= 8 ? atoi(spl[7].c_str()) : 15;
+            int maxDistanceMm = atoi(spl[2].c_str());
+            int pushDistanceMm = atoi(spl[3].c_str());
+            int scanTurnDegPerSec = result_size >= 5 ? atoi(spl[4].c_str()) : 35;
+            int approachPwm = result_size >= 6 ? atoi(spl[5].c_str()) : 35;
+            int pushPwm = result_size >= 7 ? atoi(spl[6].c_str()) : 35;
+            int measureHz = result_size >= 8 ? atoi(spl[7].c_str()) : 10;
+            int scanMeasureHz = result_size >= 9 ? atoi(spl[8].c_str()) : 33;
+            if(halfSweepAngleDeg <= 0 || maxDistanceMm < 100 || pushDistanceMm < 0
+               || scanTurnDegPerSec < 10 || scanTurnDegPerSec > 90
+               || approachPwm <= 0 || approachPwm > 100 || pushPwm <= 0 || pushPwm > 100
+               || measureHz <= 0 || measureHz > 10 || scanMeasureHz <= 0 || scanMeasureHz > 100) {
+                LOGI("UltrasonicAlignTracer invalid params: half>0, max>=100, push>=0, "
+                     "10<=scan_turn<=90, 1<=pwm<=100, 1<=measure_hz<=10, "
+                     "1<=scan_measure_hz<=100\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
             if(gUltrasonicSensor.hasError()) {
                 LOGI("UltrasonicAlignTracer をスキップしました: PORT_F に超音波センサーがありません\n");
             } else {
-                 LOGI("UltrasonicAlignTracer(%ddeg, %d, %ddeg, %d, %dmm, %.2f, %dmm): 登録\n",
-                     halfSweepAngleDeg, turnPwm, stepAngleDeg, sampleCount, maxDistanceMm,
-                     wheelDegreesPerBodyDegree, centerBandMm);
+                 LOGI("UltrasonicAlignTracer(half=%ddeg, max=%dmm, push=%dmm, scan=%ddeg/s, "
+                      "approachPwm=%d, pushPwm=%d, measure=%dHz, scanMeasure=%dHz): push\n",
+                      halfSweepAngleDeg, maxDistanceMm, pushDistanceMm, scanTurnDegPerSec,
+                      approachPwm, pushPwm, measureHz, scanMeasureHz);
                 gUltrasonicAlignTracer = new UltrasonicAlignTracer(
-                    gWalker, &gUltrasonicSensor, halfSweepAngleDeg, turnPwm, stepAngleDeg,
-                    sampleCount, maxDistanceMm, wheelDegreesPerBodyDegree, centerBandMm);
+                    gWalker, &gUltrasonicSensor, halfSweepAngleDeg, maxDistanceMm,
+                    pushDistanceMm, scanTurnDegPerSec, approachPwm, pushPwm, measureHz,
+                    scanMeasureHz);
                 gUltrasonicAlignTracer->addStarter(gStarter);
                 tracerList.push_back(gUltrasonicAlignTracer);
             }
-        }else if(spl[0] == "BottleDeliveryTracer") {
-            
-            double targetDistance, p, i, d;
-            int targetBrightness, pwm, maxPwm;
-            bool isLeftEdge;
-            PidGain* pidGain;
-            targetDistance = atof(spl[1].c_str());//距離の入力
-            gDistanceTerminator = new DistanceTerminator(gWalker, targetDistance);
-            targetBrightness = atof(spl[2].c_str()); //輝度の入力
-            pwm = atof(spl[3].c_str());//基準PWMの入力
-            maxPwm = atof(spl[4].c_str());//MaxPWMの入力
-            isLeftEdge = (strcmp(spl[5].c_str(), "LEFT_EDGE") == 0);//エッジの入力
-
-            // Lコースの場合、エッジを反転させる
-            if(IS_LEFT_COURSE) {
-                isLeftEdge = !isLeftEdge;
+        } else if(spl[0] == "RallyTracer") {
+            if(result_size != 19 && result_size != 22 && result_size != 23 && result_size != 26) {
+                LOGI("RallyTracer requires 18 params: <move_pwm> <turn_pwm> <start_x> <start_y> "
+                     "<start_heading_deg> <lap_count> "
+                     "<red_gx1> <red_gy1> <red_gx2> <red_gy2> "
+                     "<blue_gx1> <blue_gy1> <blue_gx2> <blue_gy2> "
+                     "<yellow_gx1> <yellow_gy1> <yellow_gx2> <yellow_gy2> "
+                     "[<end_x> <end_y> <end_heading_deg>] "
+                     "[<marker_enable> <marker_reflection_threshold> "
+                     "<marker_snap_window_deg> <marker_cooldown_ticks>]\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
             }
 
-            p = atof(spl[6].c_str());//kpの入力
-            i = atof(spl[7].c_str());//kiの入力
-              d = atof(spl[8].c_str());//kdの入力
+            int movePwm = atoi(spl[1].c_str());
+            int turnPwm = atoi(spl[2].c_str());
+            QRPos startPos = {atoi(spl[3].c_str()), atoi(spl[4].c_str())};
+            int startHeadingDeg = atoi(spl[5].c_str());
+            int lapCount = atoi(spl[6].c_str());
 
-              LOGI("BottleDeliveryTracer(%lf, %d, %d, %d, %s, PidGain(%lf, %lf, %lf)): 登録\n",
-                 targetDistance, targetBrightness, pwm, maxPwm,
-                  isLeftEdge ? "LEFT_EDGE" : "RIGHT_EDGE", p, i, d);
-            gBottleDeliveryTracer = new BottleDeliveryTracer(
-                gWalker,
-                gLineMonitor,
-                &gUltrasonicSensor,
-                &gColorSensor,
-                &gArmMotor,
-                targetDistance,
-                targetBrightness,
-                pwm,
-                maxPwm,
-                isLeftEdge,
-                p,
-                i,
-                d);
-            gBottleDeliveryTracer->addStarter(gStarter);
-            gBottleDeliveryTracer->addTerminator(gDistanceTerminator);
-            tracerList.push_back(gBottleDeliveryTracer);
+            GateInfo gates;
+            gates.red.gx1 = atoi(spl[7].c_str());
+            gates.red.gy1 = atoi(spl[8].c_str());
+            gates.red.gx2 = atoi(spl[9].c_str());
+            gates.red.gy2 = atoi(spl[10].c_str());
+            gates.blue.gx1 = atoi(spl[11].c_str());
+            gates.blue.gy1 = atoi(spl[12].c_str());
+            gates.blue.gx2 = atoi(spl[13].c_str());
+            gates.blue.gy2 = atoi(spl[14].c_str());
+            gates.yellow.gx1 = atoi(spl[15].c_str());
+            gates.yellow.gy1 = atoi(spl[16].c_str());
+            gates.yellow.gx2 = atoi(spl[17].c_str());
+            gates.yellow.gy2 = atoi(spl[18].c_str());
+
+            bool hasFinalPose = result_size == 22 || result_size == 26;
+            QRPos finalPos = hasFinalPose ? QRPos{atoi(spl[19].c_str()), atoi(spl[20].c_str())}
+                                           : startPos;
+            int finalHeadingDeg = hasFinalPose ? atoi(spl[21].c_str()) : -1;
+            size_t markerIndex = hasFinalPose ? 22 : 19;
+            bool hasMarkerCorrection = result_size == 23 || result_size == 26;
+            bool enableMarkerCorrection = hasMarkerCorrection
+                ? (atoi(spl[markerIndex].c_str()) != 0) : false;
+            int markerReflectionThreshold = hasMarkerCorrection
+                ? atoi(spl[markerIndex + 1].c_str()) : 20;
+            int markerSnapWindowDeg = hasMarkerCorrection
+                ? atoi(spl[markerIndex + 2].c_str()) : 180;
+            int markerCooldownTicks = hasMarkerCorrection
+                ? atoi(spl[markerIndex + 3].c_str()) : 25;
+
+            if(IS_LEFT_COURSE) {
+                auto mirrorQrX = [](int x) { return 5 - x; };
+                auto mirrorGateX = [](int gx) { return 6 - gx; };
+                auto mirrorHeading = [](int heading) {
+                    int normalized = ((heading % 360) + 360) % 360;
+                    return (180 - normalized + 360) % 360;
+                };
+
+                startPos.x = mirrorQrX(startPos.x);
+                startHeadingDeg = mirrorHeading(startHeadingDeg);
+                if(hasFinalPose) {
+                    finalPos.x = mirrorQrX(finalPos.x);
+                    finalHeadingDeg = mirrorHeading(finalHeadingDeg);
+                }
+
+                gates.red.gx1 = mirrorGateX(gates.red.gx1);
+                gates.red.gx2 = mirrorGateX(gates.red.gx2);
+                gates.blue.gx1 = mirrorGateX(gates.blue.gx1);
+                gates.blue.gx2 = mirrorGateX(gates.blue.gx2);
+                gates.yellow.gx1 = mirrorGateX(gates.yellow.gx1);
+                gates.yellow.gx2 = mirrorGateX(gates.yellow.gx2);
+            }
+
+            RallyRouteSolver::Config cfg;
+            cfg.startPos = startPos;
+            cfg.lapCount = lapCount;
+            cfg.hasFinalPos = hasFinalPose;
+            cfg.finalPos = finalPos;
+            RallyRoute route = RallyRouteSolver::solve(gates, cfg);
+
+            LOGI("RallyTracer(move=%d turn=%d start=(%d,%d) heading=%d lap=%d "
+                 "end=(%d,%d) endHeading=%d marker=%d thr=%d snap=%d cd=%d): push\n",
+                 movePwm, turnPwm, startPos.x, startPos.y, startHeadingDeg, lapCount,
+                 finalPos.x, finalPos.y, finalHeadingDeg, enableMarkerCorrection ? 1 : 0,
+                 markerReflectionThreshold, markerSnapWindowDeg, markerCooldownTicks);
+              LOGI("[RALLY] gates=red((%d,%d)-(%d,%d)) blue((%d,%d)-(%d,%d)) "
+                  "yellow((%d,%d)-(%d,%d))\n",
+                  gates.red.gx1, gates.red.gy1, gates.red.gx2, gates.red.gy2,
+                  gates.blue.gx1, gates.blue.gy1, gates.blue.gx2, gates.blue.gy2,
+                  gates.yellow.gx1, gates.yellow.gy1, gates.yellow.gx2, gates.yellow.gy2);
+              LOGI("[RALLY] %s", route.toString().c_str());
+
+            gRallyTracer = new RallyTracer(gWalker, route, movePwm, turnPwm, startPos,
+                                           startHeadingDeg, finalHeadingDeg, &gColorSensor,
+                                           enableMarkerCorrection, markerReflectionThreshold,
+                                           markerSnapWindowDeg, markerCooldownTicks);
+            gRallyTracer->addStarter(gStarter);
+            tracerList.push_back(gRallyTracer);
+        } else if(spl[0] == "RallyRouteTracer") {
+            bool hasMarkerCorrection = result_size >= 13 && spl[result_size - 5] == "MARKER";
+            size_t routeConfigEndIndex = hasMarkerCorrection ? result_size - 5 : result_size;
+            if(routeConfigEndIndex < 8 ||
+               ((routeConfigEndIndex % 2) == 1 && routeConfigEndIndex < 11)) {
+                LOGI("RallyRouteTracer requires: <move_pwm> <turn_pwm> <start_x> <start_y> "
+                     "<start_heading_deg> <route_x1> <route_y1> [<route_x2> <route_y2> ...] "
+                     "[<end_x> <end_y> <end_heading_deg>] "
+                     "[MARKER <enable> <reflection_threshold> <snap_window_deg> <cooldown_ticks>]\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            int movePwm = atoi(spl[1].c_str());
+            int turnPwm = atoi(spl[2].c_str());
+            QRPos startPos = {atoi(spl[3].c_str()), atoi(spl[4].c_str())};
+            int startHeadingDeg = atoi(spl[5].c_str());
+            bool hasFinalPose = (routeConfigEndIndex % 2) == 1;
+            size_t routeEndIndex = hasFinalPose ? routeConfigEndIndex - 3 : routeConfigEndIndex;
+            QRPos finalPos = hasFinalPose
+                ? QRPos{atoi(spl[routeEndIndex].c_str()), atoi(spl[routeEndIndex + 1].c_str())}
+                : startPos;
+            int finalHeadingDeg = hasFinalPose ? atoi(spl[routeEndIndex + 2].c_str()) : -1;
+            size_t markerIndex = result_size - 4;
+            bool enableMarkerCorrection = hasMarkerCorrection
+                ? (atoi(spl[markerIndex].c_str()) != 0) : false;
+            int markerReflectionThreshold = hasMarkerCorrection
+                ? atoi(spl[markerIndex + 1].c_str()) : 20;
+            int markerSnapWindowDeg = hasMarkerCorrection
+                ? atoi(spl[markerIndex + 2].c_str()) : 180;
+            int markerCooldownTicks = hasMarkerCorrection
+                ? atoi(spl[markerIndex + 3].c_str()) : 25;
+
+            if(IS_LEFT_COURSE) {
+                auto mirrorQrX = [](int x) { return 5 - x; };
+                auto mirrorHeading = [](int heading) {
+                    int normalized = ((heading % 360) + 360) % 360;
+                    return (180 - normalized + 360) % 360;
+                };
+
+                startPos.x = mirrorQrX(startPos.x);
+                startHeadingDeg = mirrorHeading(startHeadingDeg);
+                if(hasFinalPose) {
+                    finalPos.x = mirrorQrX(finalPos.x);
+                    finalHeadingDeg = mirrorHeading(finalHeadingDeg);
+                }
+            }
+
+            RallyRoute route;
+            QRPos currentPos = startPos;
+            for(size_t i = 6; i < routeEndIndex; i += 2) {
+                QRPos destination = {atoi(spl[i].c_str()), atoi(spl[i + 1].c_str())};
+                if(IS_LEFT_COURSE) {
+                    destination.x = 5 - destination.x;
+                }
+
+                if(destination.isVirtual()) {
+                    route.addStep(RouteStep::virtualDetour(destination, currentPos));
+                } else {
+                    route.addStep(RouteStep::move(destination));
+                    currentPos = destination;
+                }
+            }
+            if(hasFinalPose && currentPos != finalPos) {
+                route.addStep(RouteStep::move(finalPos));
+            }
+
+              LOGI("RallyRouteTracer(move=%d turn=%d start=(%d,%d) heading=%d steps=%u end=(%d,%d) endHeading=%d marker=%d thr=%d snap=%d cd=%d): push\n",
+                 movePwm, turnPwm, startPos.x, startPos.y, startHeadingDeg,
+                  static_cast<unsigned>(route.size()), finalPos.x, finalPos.y, finalHeadingDeg,
+                  enableMarkerCorrection ? 1 : 0, markerReflectionThreshold,
+                  markerSnapWindowDeg, markerCooldownTicks);
+              LOGI("[RALLY] %s", route.toString().c_str());
+
+            gRallyTracer = new RallyTracer(gWalker, route, movePwm, turnPwm, startPos,
+                                       startHeadingDeg, finalHeadingDeg, &gColorSensor,
+                                       enableMarkerCorrection, markerReflectionThreshold,
+                                       markerSnapWindowDeg, markerCooldownTicks);
+            gRallyTracer->addStarter(gStarter);
+            tracerList.push_back(gRallyTracer);
+        } else if(spl[0] == "UltrasonicDistanceLoggerTracer") {
+            if(result_size != 2) {
+                LOGI("UltrasonicDistanceLoggerTracer requires 1 param: <sample_count>\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            int sampleCount = atoi(spl[1].c_str());
+            if(gUltrasonicSensor.hasError()) {
+                LOGI("UltrasonicDistanceLoggerTracer skipped: ultrasonic sensor is unavailable on PORT_F\n");
+            } else {
+                LOGI("UltrasonicDistanceLoggerTracer(samples=%d): push\n", sampleCount);
+                gUltrasonicDistanceLoggerTracer = new UltrasonicDistanceLoggerTracer(
+                    gWalker, &gUltrasonicSensor, sampleCount);
+                gUltrasonicDistanceLoggerTracer->addStarter(gStarter);
+                tracerList.push_back(gUltrasonicDistanceLoggerTracer);
+            }
+        } else if(spl[0] == "UltrasonicProbeTracer") {
+            if(result_size != 3 && result_size != 4) {
+                LOGI("UltrasonicProbeTracer requires: <DISTL|DISTS|TRAW|ADRAW|ALL> "
+                     "<sample_count> [sample_interval_ms]\n");
+                if(!std::getline(configStream, line)) {
+                    break;
+                }
+                continue;
+            }
+
+            const std::string& modeName = spl[1];
+            int sampleCount = atoi(spl[2].c_str());
+            int sampleIntervalMs = result_size == 4 ? atoi(spl[3].c_str()) : 100;
+            if(!UltrasonicProbeTracer::isSupportedMode(modeName) || sampleCount <= 0
+               || sampleIntervalMs <= 0) {
+                LOGI("UltrasonicProbeTracer requires a supported mode, sample_count > 0, and "
+                     "sample_interval_ms > 0\n");
+            } else if(gUltrasonicSensor.hasError()) {
+                LOGI("UltrasonicProbeTracer skipped: ultrasonic sensor is unavailable on PORT_F\n");
+            } else {
+                LOGI("UltrasonicProbeTracer(mode=%s, samples=%d, interval=%dms): push\n",
+                     modeName.c_str(), sampleCount, sampleIntervalMs);
+                gUltrasonicProbeTracer = new UltrasonicProbeTracer(
+                    gWalker, modeName, sampleCount, sampleIntervalMs);
+                gUltrasonicProbeTracer->addStarter(gStarter);
+                tracerList.push_back(gUltrasonicProbeTracer);
+            }
         }
         // TODO:難所トレーサーの実装
         //        else if (spl[0] == "RotateTracer")

@@ -57,7 +57,9 @@ extern bool IS_LEFT_COURSE; // Lコース
 extern void main_task(intptr_t exinf);
 extern void calibrator_task(intptr_t exinf);
 extern void tracer_task(intptr_t exinf);
+#ifdef SPIKERT
 extern void sender_task(intptr_t exinf);
+#endif
 extern void ev3_cyc_tracer(intptr_t exinf);
 
 #endif /* TOPPERS_MACRO_ONLY */
