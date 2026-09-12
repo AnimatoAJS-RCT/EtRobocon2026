@@ -45,6 +45,7 @@ private:
         CREEP_TURN,
         CREEPING,
         BACKING,
+        LOST_RETURN_TURN,
         PUSHING,
         RETURNING,
         RETURN_TURNING,
@@ -65,6 +66,7 @@ private:
     static const int SCAN_PWM_MAX = 35;
     static const int SCAN_PWM_INITIAL = 25;
     static const int TARGET_VERIFY_HALF_BODY_DEG = 30;
+    static const int FINE_SCAN_MAX_BODY_DEG_PER_SEC = 35;
     static const int NEAR_ALIGN_HALF_BODY_DEG = 20;
     static const int SETTLE_TICKS = 8;        // ブレーキ後の整定 (80ms)
     static const int APPROACH_SAMPLES = 5;
@@ -103,10 +105,8 @@ private:
     static const int RESCAN_BACKUP_MAX_MM = 50;
 
     // 初期探索で未検出なら、開始方位へ戻って段階的に前進して探索範囲を拡大する。
-    static const int MAX_CREEP_ATTEMPTS = 2;
-    static const int CREEP_INITIAL_MM = 100;
-    static const int CREEP_INCREMENT_MM = 50;
-    static const int MAX_SWEEP_HALF_BODY_DEG = 90;
+    static const int MAX_CREEP_ATTEMPTS = 5;
+    static const int CREEP_STEP_MM = 50;
     static const int PUSH_LOST_BACKUP_MM = 100;
 
     // 終了時は開始地点より少し後方まで退避して、次のゴール走行の方位を固定する
@@ -146,6 +146,8 @@ private:
     bool mNearAlignScan;
     bool mNearAlignDone;
     int mNearAlignFallbackWdeg;
+    bool mNearAlignVerifyRequired = false;
+    int mNearAlignVerifyCenterWdeg = 0;
 
     // 静止測定の進行状態
     int mSettleRemaining;
@@ -165,14 +167,19 @@ private:
     int mSweepValidSamples;
     int mSweepNoEchoSamples;
     int mSweepOutOfRangeSamples;
+    int mSweepTicks;
+    int mSweepStartForwardWdeg;
     int mScanPwm;
     int mScanSpeedTicks;
     int mScanSpeedStartWdeg;
+    bool mTurnHolding;
+    int mTurnStartCountSum;
 
     // 接近時の追跡状態
     int mLastValidMm;
     int mLastValidForwardWdeg;
     int mApproachStartForwardWdeg;
+    bool mApproachStarted = false;
     int mInvalidRounds;
     bool mTargetVerifyAttempted;
     int mRescanAttempts;
@@ -182,6 +189,9 @@ private:
     int mBackupStartForwardWdeg;
     int mBackupTargetWdeg;
     int mPendingRescanHalfWdeg;
+    bool mLostRecovery = false;
+    int mLostRecoveryAttempts = 0;
+    int mPendingLostBackupMm = 0;
 
     // 前進パルス・押し出し
     int mPulseStartForwardWdeg;
@@ -216,6 +226,7 @@ private:
     void startPulse(int distanceMm);
     void startPush(int remainingMm);
     void startPushLostRescan();
+    void startLostBackup(int backupMm);
     void startRescan();
     void doRescanSweep();
     void runCreep();
@@ -228,6 +239,8 @@ private:
     void finish(bool pushed);
     bool driveTurnTo(int targetWdeg, int pwmLimit);
     bool driveScanTo(int targetWdeg);
+    int scanTargetBodyDegPerSec() const;
+    void driveRotation(int signedPwm);
     void driveForward(int basePwm);
     void updateStall(int* leftBoost, int* rightBoost);
     int getTurnWdeg() const;
