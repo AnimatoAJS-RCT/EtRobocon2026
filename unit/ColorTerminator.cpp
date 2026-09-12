@@ -17,9 +17,11 @@
  * @param colorSensor ColorSensor
  * @param termColor 停止する色
  */
-ColorTerminator::ColorTerminator(const spikeapi::ColorSensor* colorSensor, eColor termColor)
+ColorTerminator::ColorTerminator(const spikeapi::ColorSensor* colorSensor, eColor termColor,
+                                 int calibratedBlackReflection)
   : mColorSensor(colorSensor),
     mTermColor(termColor),
+    mCalibratedBlackReflection(calibratedBlackReflection),
     mLogCounter(0),
     mHasLastLoggedColor(false),
     mLastLoggedColor(BLACK),
@@ -33,6 +35,11 @@ bool ColorTerminator::isToBeTerminate()
     mColorSensor->getHSV(hsv);
     eColor c = getColor(hsv.h, hsv.s, hsv.v);
     bool isRawMatch = (c == mTermColor);
+    if(mTermColor == BLACK && mCalibratedBlackReflection >= 0) {
+      int reflection = mColorSensor->getReflection();
+      isRawMatch = std::abs(reflection - mCalibratedBlackReflection)
+                   <= BLACK_REFLECTION_TOLERANCE;
+    }
     if(isRawMatch) {
       mConsecutiveMatchCount++;
     } else {
