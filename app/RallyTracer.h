@@ -3,8 +3,8 @@
  * @brief ETラリー走行トレーサー
  *
  * RallyRoute に従ってロボットを動かす。
- * 各ステップで「旋回 → 前進」を繰り返し、
- * VIRTUAL_DETOUR ステップでは追加で「後退（戻り）」フェーズを実行する。
+ * 各ステップで「旋回 → 軸方向への移動」を繰り返し、
+ * VIRTUAL_DETOUR ステップでは追加で反対向きに戻るフェーズを実行する。
  *
  * まずは RallyRoute を手入力して動作確認するための実装。
  */
@@ -58,11 +58,25 @@ public:
     /// UltrasonicAlignTracer と同じ 14/9 ≈ 1.556 を使用
     static constexpr double WHEEL_DEGREES_PER_BODY_DEGREE = 2.106;
 
+    /// 実測した車体角に合わせて、方向ごとの旋回目標を校正する
+    /// targetWdeg = requestedBodyDeg * WHEEL_DEGREES_PER_BODY_DEGREE * scale
+    static constexpr double RIGHT_TURN_SCALE = 1.0;   // 時計回り
+    static constexpr double LEFT_TURN_SCALE = 1.0;    // 反時計回り
+
     /// 旋回完了の許容誤差 [ホイール度]
     static const int TURN_TOLERANCE = 1;
 
+    /// 前回旋回の誤差を次回目標へ反映する最大補正量 [ホイール度]
+    static const int TURN_CORRECTION_LIMIT = 20;
+
     /// 直進完了の許容誤差 [ホイール度]
-    static const int MOVE_TOLERANCE = 10;
+    static const int MOVE_TOLERANCE = 2;
+
+    /// 目標直前に低速へ切り替える残り距離 [ホイール度]
+    static const int APPROACH_WINDOW = 100;
+
+    /// モーターが動き続ける最低付近のアプローチPWM
+    static const int APPROACH_PWM = 40;
 
     /// 前方カメラがマーカーを検出してから車体中心が通過するまでのホイール角 [度]
     static const int MARKER_TO_CENTER_WHEEL_DEGREES = 180;
@@ -73,6 +87,7 @@ public:
 private:
     enum Phase {
         TURNING,    ///< 目標方向へ旋回中
+        BRAKING,    ///< 旋回完了後、停止を確認中
         MOVING,     ///< 目標 QR へ前進中
         RETURNING,  ///< 仮想 QR から実 QR へ後退中 (VIRTUAL_DETOUR 専用)
         MARKER_OFFSET, ///< マーカー検出後、車体中心をマーカー位置まで進める
@@ -95,6 +110,9 @@ private:
     int mPhaseStartLeftCount;       ///< 現フェーズ開始時の左モーター値
     int mPhaseStartRightCount;      ///< 現フェーズ開始時の右モーター値
     int mTargetWheelDegrees;        ///< 現フェーズの目標ホイール変化量（絶対値）
+    int mPreviousTurnError;         ///< 前回旋回の実績値-目標値 [ホイール度]
+    int mMoveDirection;              ///< 走行方向（+1=前進、-1=後退）
+    int mBrakeCountdown;             ///< ブレーキフェーズの残りフレーム数
 
     const spikeapi::ColorSensor* mColorSensor;
     bool mEnableMarkerCorrection;
@@ -111,7 +129,7 @@ private:
     // ---- フェーズ遷移 ----
     void startNextStep();
     void beginTurning(int targetHeadingDeg);
-    void beginMoving(int wheelDegrees);
+    void beginMoving(int wheelDegrees, int moveDirection);
     void beginReturning(int wheelDegrees);
     void beginMarkerOffset();
     void beginMarkerSearch();
@@ -120,6 +138,7 @@ private:
 
     // ---- フェーズ実行 ----
     void execTurning();
+    void execBraking();
     void execMoving();
     void execReturning();
     void execMarkerOffset();
@@ -140,6 +159,7 @@ private:
     static int shortestTurn(int fromDeg, int toDeg);
     /// from → to 方向の角度 [度、0=東、90=北] を返す
     static int calcHeadingDeg(const QRPos& from, const QRPos& to);
+    static int calcMoveDirection(const QRPos& from, const QRPos& to);
     /// from → to のユークリッド距離に対応するホイール回転角 [度] を返す
     static int calcMoveWheelDegrees(const QRPos& from, const QRPos& to);
 };
