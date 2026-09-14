@@ -19,6 +19,7 @@
 #include "RotateTracer.h"
 #include "ScenarioTracer.h"
 #include "UltrasonicAlignTracer.h"
+#include "BottleDeliveryTracer.h"
 #include "UltrasonicDistanceLoggerTracer.h"
 #include "UltrasonicProbeTracer.h"
 #include "RallyRouteSolver.h"
@@ -29,6 +30,7 @@
 #include "Calibrator.h"
 #include "Util.h"
 #include "Log.h"
+
 
 #include "Light.h"
 #include "Button.h"
@@ -76,6 +78,7 @@ static ArmTracer* gArmTracer;
 static RotateTracer* gRotateTracer;
 static ScenarioTracer* gScenarioTracer;
 static UltrasonicAlignTracer* gUltrasonicAlignTracer;
+static BottleDeliveryTracer* gBottleDeliveryTracer;
 static UltrasonicDistanceLoggerTracer* gUltrasonicDistanceLoggerTracer;
 static UltrasonicProbeTracer* gUltrasonicProbeTracer;
 static RallyTracer* gRallyTracer;
@@ -135,11 +138,11 @@ void generateTracerList()
 
     // Neither the firmware nor the athrill simulator can read the host
     // workspace at runtime, so read the tracer.ini content embedded at build time.
-    LOGI("embedded tracer.ini\n");
+    LOGI("組み込みトレーサ設定を読み込みます。\n");
     std::istringstream configStream(kTracerIni);
     std::string line;
     if(!std::getline(configStream, line)) {
-        LOGI("embedded tracer.ini is empty.\n");
+        LOGI("組み込みトレーサ設定が空です。\n");
         return;
     }
     while(line != "#end") {
@@ -191,7 +194,7 @@ void generateTracerList()
                     stopColor = YELLOW;
                 } else {
                     hasStopColor = false;
-                    LOGI("Unknown stopColor: %s\n", spl[4].c_str());
+                    LOGI("不明な停止色です: %s\n", spl[4].c_str());
                 }
 
                 if(hasStopColor) {
@@ -223,7 +226,7 @@ void generateTracerList()
             p = atof(spl[6].c_str());
             i = atof(spl[7].c_str());
             d = atof(spl[8].c_str());
-            LOGI("LineTracer(%lf, %d, %d, %d, %s, PidGain(%lf, %lf, %lf)): push\n",
+            LOGI("LineTracer(%lf, %d, %d, %d, %s, PidGain(%lf, %lf, %lf)): 登録\n",
                  targetDistance, targetBrightness, pwm, maxPwm,
                  isLeftEdge ? "LEFT_EDGE" : "RIGHT_EDGE", p, i, d);
             pidGain = new PidGain(p, i, d);
@@ -245,11 +248,11 @@ void generateTracerList()
                     stopColor = YELLOW;
                 } else {
                     hasStopColor = false;
-                    LOGI("Unknown stopColor: %s\n", spl[9].c_str());
+                    LOGI("不明な停止色です: %s\n", spl[9].c_str());
                 }
 
                 if(hasStopColor) {
-                    LOGI("stopColor: %s\n", colorToString(stopColor));
+                    LOGI("停止色: %s\n", colorToString(stopColor));
                     gColorTerminator = new ColorTerminator(&gColorSensor, stopColor);
                     gLineTracer->addTerminator(gColorTerminator);
                 }
@@ -366,7 +369,7 @@ void generateTracerList()
                 continue;
             }
             if(gUltrasonicSensor.hasError()) {
-                LOGI("UltrasonicAlignTracer skipped: ultrasonic sensor is unavailable on PORT_F\n");
+                LOGI("UltrasonicAlignTracer をスキップしました: PORT_F に超音波センサーがありません\n");
             } else {
                  LOGI("UltrasonicAlignTracer(half=%ddeg, max=%dmm, push=%dmm, scan=%ddeg/s, "
                       "approachPwm=%d, pushPwm=%d, measure=%dHz, scanMeasure=%dHz): push\n",
@@ -736,20 +739,20 @@ void main_task(intptr_t unused)
 {
     ER ercd;
     user_system_create();  // センサやモータの初期化処理
-    LOGI("[MAIN] user_system_create done\n");
+    LOGI("[MAIN] user_system_create 完了\n");
     gCalibratorWakeSent = false;
 
     // 周期ハンドラ開始
     ercd = sta_cyc(CYC_CALIBRATOR);
-    LOGI("[MAIN] sta_cyc(CYC_CALIBRATOR)=%d\n", ercd);
+    LOGI("[MAIN] sta_cyc(CYC_CALIBRATOR)=%d を開始\n", ercd);
 
-    LOGI("[MAIN] waiting calibration completion...\n");
+    LOGI("[MAIN] キャリブレーション完了待ち...\n");
     ercd = slp_tsk();  // キャリブレーション完了まで待つ
-    LOGI("[MAIN] woke from calibration wait, slp_tsk()=%d\n", ercd);
+    LOGI("[MAIN] キャリブレーション待ちから復帰しました, slp_tsk()=%d\n", ercd);
 
     // 周期ハンドラ停止
     ercd = stp_cyc(CYC_CALIBRATOR);
-    LOGI("[MAIN] stp_cyc(CYC_CALIBRATOR)=%d\n", ercd);
+    LOGI("[MAIN] stp_cyc(CYC_CALIBRATOR)=%d を停止\n", ercd);
 
     int black = gCalibrator->getBlack();
     int white = gCalibrator->getWhite();
@@ -765,22 +768,22 @@ void main_task(intptr_t unused)
             int normalizedTarget = lineTracer->getNormalizedTargetBrightness();
             int scaledTarget = black + (white - black) * normalizedTarget / 100;
             lineTracer->setTargetBrightness(scaledTarget);
-            LOGI("[MAIN] LineTracer target: normalized=%d scaled=%d (black=%d white=%d)\n",
+            LOGI("[MAIN] LineTracer 目標値: normalized=%d scaled=%d (black=%d white=%d)\n",
                  normalizedTarget, scaledTarget, black, white);
         }
     }
 
     // 周期ハンドラ開始
     ercd = sta_cyc(CYC_TRACER);
-    LOGI("[MAIN] sta_cyc(CYC_TRACER)=%d\n", ercd);
+    LOGI("[MAIN] sta_cyc(CYC_TRACER)=%d を開始\n", ercd);
 
-    LOGI("[MAIN] waiting tracer completion or left button...\n");
+    LOGI("[MAIN] トレーサ完了または左ボタン待ち...\n");
     ercd = slp_tsk();  // トレース完了 or レフトボタン押下まで待つ
-    LOGI("[MAIN] woke from tracer wait, slp_tsk()=%d\n", ercd);
+    LOGI("[MAIN] トレーサ待ちから復帰しました, slp_tsk()=%d\n", ercd);
 
     // 周期ハンドラ停止
     ercd = stp_cyc(CYC_TRACER);
-    LOGI("[MAIN] stp_cyc(CYC_TRACER)=%d\n", ercd);
+    LOGI("[MAIN] stp_cyc(CYC_TRACER)=%d を停止\n", ercd);
 
     user_system_destroy();  // 終了処理
 
@@ -801,7 +804,7 @@ void calibrator_task(intptr_t exinf)
         if(gCalibrator->isFinished()) {
             gCalibratorWakeSent = true;
             ercd = wup_tsk(MAIN_TASK);
-            LOGI("[CAL_TASK] wup_tsk(MAIN_TASK)=%d\n", ercd);
+            LOGI("[CAL_TASK] wup_tsk(MAIN_TASK)=%d を起床\n", ercd);
         }
     }
 
@@ -831,16 +834,16 @@ void tracer_task(intptr_t exinf)
 
             if(!tracerList.empty() && tracerList.front() != nullptr) {
                 int nextIndex = tracerListSize - tracerList.size() + 1;
-                LOGI("[TRACER_TASK] next tracer: %d/%d %s\n", nextIndex, tracerListSize,
+                LOGI("[TRACER_TASK] 次のトレーサ: %d/%d %s\n", nextIndex, tracerListSize,
                      tracerTypeName(tracerList.front()));
             } else {
-                LOGI("[TRACER_TASK] no next tracer\n");
+                LOGI("[TRACER_TASK] 次のトレーサはありません\n");
             }
         }
 
         if(tracerList.empty()) {
             ercd = wup_tsk(MAIN_TASK);
-            LOGI("[TRACER_TASK] tracerList empty: wup_tsk(MAIN_TASK)=%d\n", ercd);
+            LOGI("[TRACER_TASK] tracerList が空です: wup_tsk(MAIN_TASK)=%d\n", ercd);
             ext_tsk();
         }
 
