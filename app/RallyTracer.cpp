@@ -38,7 +38,8 @@ RallyTracer::RallyTracer(Walker* walker, const RallyRoute& route,
       mPhaseStartLeftCount(0),
       mPhaseStartRightCount(0),
       mTargetWheelDegrees(0),
-      mColorSensor(colorSensor),
+            mPreviousTurnError(0),
+    mMoveDirection(1),      mBrakeCountdown(0),      mColorSensor(colorSensor),
       mEnableMarkerCorrection(enableMarkerCorrection),
       mMarkerReflectionThreshold(markerReflectionThreshold),
       mMarkerSnapWindowDegrees(std::max(1, markerSnapWindowDegrees)),
@@ -66,10 +67,16 @@ void RallyTracer::run()
 
         case WAITING_FOR_START:
             if(mStarterList.empty()) {
+                mWalker->init();
+                LOGI("[RALLY] wheel encoders reset at start: wheel=(%d,%d)\n",
+                     mWalker->getLeftCount(), mWalker->getRightCount());
                 startNextStep();
             } else {
                 for(auto starter : mStarterList) {
                     if(starter->isPushed()) {
+                        mWalker->init();
+                        LOGI("[RALLY] wheel encoders reset at start: wheel=(%d,%d)\n",
+                             mWalker->getLeftCount(), mWalker->getRightCount());
                         startNextStep();
                         return;
                     }
@@ -80,10 +87,18 @@ void RallyTracer::run()
         case WALKING:
             switch(mPhase) {
                 case TURNING:   execTurning();   break;
+                case BRAKING:   execBraking();   break;
                 case MOVING:    execMoving();    break;
                 case RETURNING: execReturning(); break;
                 case MARKER_OFFSET: execMarkerOffset(); break;
                 case MARKER_SEARCH: execMarkerSearch(); break;
+                default:
+                    LOGE("[RALLY] invalid phase=%d step=%u; stopping\n",
+                         static_cast<int>(mPhase),
+                         static_cast<unsigned>(mCurrentStepIndex));
+                    mWalker->brake();
+                    mState = TERMINATED;
+                    break;
             }
             break;
 
@@ -91,6 +106,9 @@ void RallyTracer::run()
             break;
 
         default:
+            LOGE("[RALLY] invalid state=%d; stopping\n", static_cast<int>(mState));
+            mWalker->brake();
+            mState = TERMINATED;
             break;
     }
 }
@@ -101,6 +119,11 @@ void RallyTracer::run()
 
 void RallyTracer::startNextStep()
 {
+    LOGD("[RALLY] startNextStep: index=%u size=%u state=%d phase=%d\n",
+         static_cast<unsigned>(mCurrentStepIndex),
+         static_cast<unsigned>(mRoute.size()),
+         static_cast<int>(mState), static_cast<int>(mPhase));
+
     if(mCurrentStepIndex >= mRoute.size()) {
         if(mFinalHeadingDeg >= 0 && !mIsFinalTurning) {
             int turnBodyDeg = shortestTurn(mHeadingDeg, mFinalHeadingDeg);
@@ -134,7 +157,8 @@ void RallyTracer::startNextStep()
     if(std::abs(turnBodyDeg) < 5) {
         // すでにほぼ正しい方向を向いている → 旋回をスキップ
         mHeadingDeg = targetHeading;
-        beginMoving(calcMoveWheelDegrees(mCurrentPos, step.destination));
+        beginMoving(calcMoveWheelDegrees(mCurrentPos, step.destination),
+                calcMoveDirection(mCurrentPos, step.destination));
     } else {
         beginTurning(targetHeading);
     }
@@ -146,28 +170,44 @@ void RallyTracer::beginTurning(int targetHeadingDeg)
 {
     mTargetHeadingDeg  = ((targetHeadingDeg % 360) + 360) % 360;
     int turnBodyDeg    = shortestTurn(mHeadingDeg, mTargetHeadingDeg);
-    mTargetWheelDegrees = static_cast<int>(turnBodyDeg * WHEEL_DEGREES_PER_BODY_DEGREE);
+    
+    // 旋回方向に応じた補正係数を適用
+    double scale = turnBodyDeg > 0 ? LEFT_TURN_SCALE : RIGHT_TURN_SCALE;
+    int nominalWheelDegrees = static_cast<int>(turnBodyDeg
+                                               * WHEEL_DEGREES_PER_BODY_DEGREE
+                                               * scale);
+    int turnCorrection = std::max(-TURN_CORRECTION_LIMIT,
+                                  std::min(TURN_CORRECTION_LIMIT,
+                                           -mPreviousTurnError));
+    mTargetWheelDegrees = nominalWheelDegrees + turnCorrection;
+    
     resetPhaseCounters();
+    mWalker->beginEncoderCorrection();
     mPhase = TURNING;
-    LOGD("[RALLY] begin turning: bodyDeg=%d wheelDeg=%d startEncoder=(%d,%d)\n",
-         turnBodyDeg, mTargetWheelDegrees,
+        LOGD("[RALLY] begin turning: bodyDeg=%d scale=%g nominal=%d correction=%d wheelDeg=%d startEncoder=(%d,%d)\n",
+            turnBodyDeg, scale, nominalWheelDegrees, turnCorrection,
+            mTargetWheelDegrees,
          mPhaseStartLeftCount, mPhaseStartRightCount);
 }
 
-void RallyTracer::beginMoving(int wheelDegrees)
+void RallyTracer::beginMoving(int wheelDegrees, int moveDirection)
 {
     mTargetWheelDegrees = wheelDegrees;
+    mMoveDirection = moveDirection >= 0 ? 1 : -1;
     resetPhaseCounters();
     mWalker->beginEncoderCorrection();
     mPhase = MOVING;
     mMarkerDetectedInPhase = false;
     mIsMarkerSearchRecoveryTurning = false;
-    LOGD("[RALLY] begin moving: wheelDeg=%d\n", wheelDegrees);
+    LOGD("[RALLY] begin moving: target=%d dir=%d wheel=(%d,%d)\n",
+         wheelDegrees, mMoveDirection,
+         mWalker->getLeftCount(), mWalker->getRightCount());
 }
 
 void RallyTracer::beginReturning(int wheelDegrees)
 {
     mTargetWheelDegrees = wheelDegrees;
+    mMoveDirection = -mMoveDirection;
     resetPhaseCounters();
     mWalker->beginEncoderCorrection();
     mPhase = RETURNING;
@@ -187,12 +227,13 @@ void RallyTracer::beginMarkerOffset()
 void RallyTracer::beginMarkerSearch()
 {
     int turnWheelDegrees = static_cast<int>(MARKER_SEARCH_ANGLE_DEGREES
-                                             * WHEEL_DEGREES_PER_BODY_DEGREE);
+                                             * WHEEL_DEGREES_PER_BODY_DEGREE * RIGHT_TURN_SCALE);
     mMarkerSearchStage = 0;
     mMarkerSearchHeadingDeg = mHeadingDeg;
     mMarkerSearchFirstTurnWheelDegrees = turnWheelDegrees;
     mTargetWheelDegrees = turnWheelDegrees;
     resetPhaseCounters();
+    mWalker->beginEncoderCorrection();
     mPhase = MARKER_SEARCH;
     LOGI("[RALLY] marker search: heading=%d range=+-%ddeg\n",
          mMarkerSearchHeadingDeg, MARKER_SEARCH_ANGLE_DEGREES);
@@ -210,6 +251,19 @@ void RallyTracer::completeMovingStep()
 
 void RallyTracer::finishStep()
 {
+    LOGD("[RALLY] finishStep: index=%u size=%u\n",
+         static_cast<unsigned>(mCurrentStepIndex),
+         static_cast<unsigned>(mRoute.size()));
+
+    if(mCurrentStepIndex >= mRoute.size()) {
+        LOGE("[RALLY] finishStep out of range: index=%u size=%u; stopping\n",
+             static_cast<unsigned>(mCurrentStepIndex),
+             static_cast<unsigned>(mRoute.size()));
+        mWalker->brake();
+        mState = TERMINATED;
+        return;
+    }
+
     const RouteStep& step = mRoute[mCurrentStepIndex];
 
     // 現在位置を更新
@@ -220,11 +274,16 @@ void RallyTracer::finishStep()
         mCurrentPos = step.destination;
     }
 
-    LOGI("[RALLY] step %u done, now at (%d,%d) heading=%d\n",
+    int leftTotal = mWalker->getLeftCount();
+    int rightTotal = mWalker->getRightCount();
+    LOGI("[RALLY] step %u done, now at (%d,%d) heading=%d wheel=(%d,%d)\n",
          static_cast<unsigned>(mCurrentStepIndex),
-         mCurrentPos.x, mCurrentPos.y, mHeadingDeg);
+         mCurrentPos.x, mCurrentPos.y, mHeadingDeg,
+         leftTotal, rightTotal);
 
     mCurrentStepIndex++;
+    LOGD("[RALLY] finishStep: advancing to index=%u\n",
+         static_cast<unsigned>(mCurrentStepIndex));
     startNextStep();
 }
 
@@ -240,9 +299,44 @@ void RallyTracer::execTurning()
     int rightDelta = mWalker->getRightCount() - mPhaseStartRightCount;
 
     if(std::abs(remaining) <= TURN_TOLERANCE) {
+        mPreviousTurnError = current - mTargetWheelDegrees;
         mWalker->brake();
-        LOGD("[RALLY] turn complete: target=%d current=%d encoderDelta=(%d,%d)\n",
-             mTargetWheelDegrees, current, leftDelta, rightDelta);
+        mWalker->setPwm(0, 0);
+        mBrakeCountdown = 30;  // 停止を2フレーム確認
+        mPhase = BRAKING;
+           LOGI("[RALLY] turn complete: target=%d actual=%d wheel=(%d,%d) delta=(%d,%d) error=%d nextCorrection=%d, entering brake\n",
+             mTargetWheelDegrees, current,
+             mWalker->getLeftCount(), mWalker->getRightCount(),
+             leftDelta, rightDelta,
+               mTargetWheelDegrees - current, -mPreviousTurnError);
+        return;
+    }
+
+    // 残量が正 → 反時計回り (CCW): 左後退, 右前進
+    // 残量が負 →     時計回り  (CW): 左前進, 右後退
+    int turnPwm = std::abs(remaining) <= APPROACH_WINDOW
+        ? std::min(mTurnPwm, APPROACH_PWM) : mTurnPwm;
+    if(remaining > 0) {
+        mWalker->setPwm(-turnPwm, turnPwm);
+    } else {
+        mWalker->setPwm(turnPwm, -turnPwm);
+    }
+    LOGD_EVERY(5,
+               "[RALLY] turning: target=%d current=%d remaining=%d wheel=(%d,%d) delta=(%d,%d) pwm=(%d,%d)\n",
+               mTargetWheelDegrees, current, remaining,
+               mWalker->getLeftCount(), mWalker->getRightCount(),
+               leftDelta, rightDelta,
+               remaining > 0 ? -turnPwm : turnPwm,
+               remaining > 0 ? turnPwm : -turnPwm);
+    mWalker->runWithEncoderCorrection(remaining > 0 ? -turnPwm : turnPwm,
+                                      remaining > 0 ? turnPwm : -turnPwm);
+}
+
+void RallyTracer::execBraking()
+{
+    mBrakeCountdown--;
+
+    if(mBrakeCountdown <= 0) {
         mHeadingDeg = mTargetHeadingDeg;
         if(mIsFinalTurning) {
             mWalker->stop();
@@ -256,32 +350,30 @@ void RallyTracer::execTurning()
             return;
         }
         const RouteStep& step = mRoute[mCurrentStepIndex];
-        beginMoving(calcMoveWheelDegrees(mCurrentPos, step.destination));
+        beginMoving(calcMoveWheelDegrees(mCurrentPos, step.destination),
+                calcMoveDirection(mCurrentPos, step.destination));
         return;
     }
 
-    // 残量が正 → 反時計回り (CCW): 左後退, 右前進
-    // 残量が負 →     時計回り  (CW): 左前進, 右後退
-    if(remaining > 0) {
-        mWalker->setPwm(-mTurnPwm, mTurnPwm);
-    } else {
-        mWalker->setPwm(mTurnPwm, -mTurnPwm);
-    }
-    LOGD_EVERY(10,
-               "[RALLY] turning: target=%d current=%d remaining=%d encoderDelta=(%d,%d) pwm=(%d,%d)\n",
-               mTargetWheelDegrees, current, remaining, leftDelta, rightDelta,
-               remaining > 0 ? -mTurnPwm : mTurnPwm,
-               remaining > 0 ? mTurnPwm : -mTurnPwm);
-    mWalker->run();
+    // ブレーキカウント中も能動ブレーキを継続し、惰性によるずれを抑える
+    mWalker->brake();
+    mWalker->setPwm(0, 0);
 }
 
 void RallyTracer::execMoving()
 {
-    int current   = getMoveWheelDegrees();
+    int leftDelta  = mWalker->getLeftCount()  - mPhaseStartLeftCount;
+    int rightDelta = mWalker->getRightCount() - mPhaseStartRightCount;
+    int current   = mMoveDirection * getMoveWheelDegrees();
     int remaining = mTargetWheelDegrees - current;
 
     if(remaining <= MOVE_TOLERANCE) {
         mWalker->brake();
+        LOGI("[RALLY] move complete: target=%d actual=%d wheel=(%d,%d) delta=(%d,%d) error=%d\n",
+             mTargetWheelDegrees, current,
+             mWalker->getLeftCount(), mWalker->getRightCount(),
+             leftDelta, rightDelta,
+             mTargetWheelDegrees - current);
         if(mEnableMarkerCorrection && mColorSensor != nullptr) {
             beginMarkerSearch();
         } else {
@@ -296,15 +388,29 @@ void RallyTracer::execMoving()
         return;
     }
 
-    mWalker->runWithEncoderCorrection(mMovePwm, mMovePwm);
+    int movePwm = remaining <= APPROACH_WINDOW
+        ? std::min(mMovePwm, APPROACH_PWM) : mMovePwm;
+    LOGD_EVERY(10,
+               "[RALLY] moving: target=%d current=%d remaining=%d wheel=(%d,%d) delta=(%d,%d) pwm=%d\n",
+               mTargetWheelDegrees, current, remaining,
+               mWalker->getLeftCount(), mWalker->getRightCount(),
+               leftDelta, rightDelta, movePwm);
+    mWalker->runWithEncoderCorrection(mMoveDirection * movePwm,
+                                      mMoveDirection * movePwm);
 }
 
 void RallyTracer::execMarkerOffset()
 {
-    int current = getMoveWheelDegrees();
+    int leftDelta  = mWalker->getLeftCount()  - mPhaseStartLeftCount;
+    int rightDelta = mWalker->getRightCount() - mPhaseStartRightCount;
+    int current = mMoveDirection * getMoveWheelDegrees();
     if(current >= mTargetWheelDegrees - MOVE_TOLERANCE) {
         mWalker->brake();
-        LOGI("[RALLY] marker offset complete: moved=%d\n", current);
+        LOGI("[RALLY] marker offset complete: target=%d actual=%d wheel=(%d,%d) delta=(%d,%d) error=%d\n",
+             mTargetWheelDegrees, current,
+             mWalker->getLeftCount(), mWalker->getRightCount(),
+             leftDelta, rightDelta,
+             mTargetWheelDegrees - current);
         if(mIsMarkerSearchRecoveryTurning) {
             beginTurning(mMarkerSearchHeadingDeg);
         } else {
@@ -313,7 +419,13 @@ void RallyTracer::execMarkerOffset()
         return;
     }
 
-    mWalker->runWithEncoderCorrection(mMovePwm, mMovePwm);
+    LOGD_EVERY(10,
+               "[RALLY] marker offset: target=%d current=%d remaining=%d wheel=(%d,%d) delta=(%d,%d)\n",
+               mTargetWheelDegrees, current, mTargetWheelDegrees - current,
+               mWalker->getLeftCount(), mWalker->getRightCount(),
+               leftDelta, rightDelta);
+    mWalker->runWithEncoderCorrection(mMoveDirection * mMovePwm,
+                                      mMoveDirection * mMovePwm);
 }
 
 void RallyTracer::execMarkerSearch()
@@ -337,6 +449,7 @@ void RallyTracer::execMarkerSearch()
             mMarkerSearchStage = 1;
             mTargetWheelDegrees = -2 * mMarkerSearchFirstTurnWheelDegrees;
             resetPhaseCounters();
+            mWalker->beginEncoderCorrection();
             LOGD("[RALLY] marker search: sweep opposite direction\n");
             return;
         }
@@ -354,22 +467,35 @@ void RallyTracer::execMarkerSearch()
     } else {
         mWalker->setPwm(mTurnPwm, -mTurnPwm);
     }
-    mWalker->run();
+    mWalker->runWithEncoderCorrection(mTargetWheelDegrees >= 0 ? -mTurnPwm : mTurnPwm,
+                                      mTargetWheelDegrees >= 0 ? mTurnPwm : -mTurnPwm);
 }
 
 void RallyTracer::execReturning()
 {
-    // 後退量は getMoveWheelDegrees() の符号反転で取得
-    int traveled  = -getMoveWheelDegrees();
+    int leftDelta  = mWalker->getLeftCount()  - mPhaseStartLeftCount;
+    int rightDelta = mWalker->getRightCount() - mPhaseStartRightCount;
+    int traveled  = mMoveDirection * getMoveWheelDegrees();
     int remaining = mTargetWheelDegrees - traveled;
 
     if(remaining <= MOVE_TOLERANCE || isMarkerSnapTriggered(remaining)) {
         mWalker->brake();
+        LOGI("[RALLY] return complete: target=%d actual=%d wheel=(%d,%d) delta=(%d,%d) error=%d\n",
+             mTargetWheelDegrees, traveled,
+             mWalker->getLeftCount(), mWalker->getRightCount(),
+             leftDelta, rightDelta,
+             mTargetWheelDegrees - traveled);
         finishStep();
         return;
     }
 
-    mWalker->runWithEncoderCorrection(-mMovePwm, -mMovePwm);
+    LOGD_EVERY(10,
+               "[RALLY] returning: target=%d traveled=%d remaining=%d wheel=(%d,%d) delta=(%d,%d)\n",
+               mTargetWheelDegrees, traveled, remaining,
+               mWalker->getLeftCount(), mWalker->getRightCount(),
+               leftDelta, rightDelta);
+    mWalker->runWithEncoderCorrection(mMoveDirection * mMovePwm,
+                                      mMoveDirection * mMovePwm);
 }
 
 // ---------------------------------------------------------------------------
@@ -450,9 +576,22 @@ int RallyTracer::calcHeadingDeg(const QRPos& from, const QRPos& to)
 {
     int dx = to.x - from.x;
     int dy = to.y - from.y;
-    double rad = std::atan2(static_cast<double>(dy), static_cast<double>(dx));
-    int deg = static_cast<int>(std::round(rad * 180.0 / M_PI));
-    return ((deg % 360) + 360) % 360;
+    if(dx != 0) {
+        return 0;
+    }
+    if(dy != 0) {
+        return 90;
+    }
+    return 0;
+}
+
+// static
+int RallyTracer::calcMoveDirection(const QRPos& from, const QRPos& to)
+{
+    int dx = to.x - from.x;
+    int dy = to.y - from.y;
+    int delta = dx != 0 ? dx : dy;
+    return delta >= 0 ? 1 : -1;
 }
 
 // static

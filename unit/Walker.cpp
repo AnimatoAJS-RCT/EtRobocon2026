@@ -77,21 +77,16 @@ void Walker::runWithEncoderCorrection(int leftPwm, int rightPwm)
 {
     const double kp = 0.02;
     const double correctionLimitRatio = 0.2;
-    int leftCount = getLeftCount() - mStraightStartLeftCount;
-    int rightCount = getRightCount() - mStraightStartRightCount;
-    double error = static_cast<double>(leftCount) * rightPwm
-                   - static_cast<double>(rightCount) * leftPwm;
+    int leftSign = leftPwm >= 0 ? 1 : -1;
+    int rightSign = rightPwm >= 0 ? 1 : -1;
+    int leftCount = leftSign * (getLeftCount() - mStraightStartLeftCount);
+    int rightCount = rightSign * (getRightCount() - mStraightStartRightCount);
+    double error = static_cast<double>(leftCount) * std::abs(rightPwm)
+                   - static_cast<double>(rightCount) * std::abs(leftPwm);
     int correction = static_cast<int>(kp * error);
 
-    int correctedLeftPwm;
-    int correctedRightPwm;
-    if(leftPwm + rightPwm >= 0) {
-        correctedLeftPwm = leftPwm - correction;
-        correctedRightPwm = rightPwm + correction;
-    } else {
-        correctedLeftPwm = leftPwm + correction;
-        correctedRightPwm = rightPwm - correction;
-    }
+    int correctedLeftPwm = leftPwm - leftSign * correction;
+    int correctedRightPwm = rightPwm + rightSign * correction;
 
     int leftMargin = static_cast<int>(std::abs(leftPwm) * correctionLimitRatio);
     int rightMargin = static_cast<int>(std::abs(rightPwm) * correctionLimitRatio);
