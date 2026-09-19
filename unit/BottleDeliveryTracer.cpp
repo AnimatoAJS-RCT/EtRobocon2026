@@ -522,6 +522,8 @@ void BottleDeliveryTracer::run()
                     if(mBlueLineTouchCountReturn >= blueLineTouchTarget) {
                         // 行きと同じ必要回数の青線を踏破したため停止する。
                         mWalker->stop();
+                        mStage = STAGE_DONE;
+                        mStageInitialized = false;
                     }
 
                     break;
