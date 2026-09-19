@@ -34,7 +34,7 @@ void RotateTracer::run()
                 mStartRightCount = mWalker->getRightCount();
                 mState = WALKING;
                 LOGI("[ROTATE] start: direction=%s requested=%ddeg target=%d wheelDeg pwm=%d\n",
-                     mDirection > 0 ? "RIGHT" : "LEFT", mRequestedAngleDeg,
+                     mDirection < 0 ? "RIGHT" : "LEFT", mRequestedAngleDeg,
                      mTargetTurnWdeg, mPwm);
                 return;
             }
@@ -44,7 +44,7 @@ void RotateTracer::run()
                     mStartRightCount = mWalker->getRightCount();
                     mState = WALKING;
                     LOGI("[ROTATE] start: direction=%s requested=%ddeg target=%d wheelDeg pwm=%d\n",
-                         mDirection > 0 ? "RIGHT" : "LEFT", mRequestedAngleDeg,
+                         mDirection < 0 ? "RIGHT" : "LEFT", mRequestedAngleDeg,
                          mTargetTurnWdeg, mPwm);
                     return;
                 }
@@ -55,7 +55,7 @@ void RotateTracer::run()
                 mWalker->brake();
                 mState = TERMINATED;
                 LOGI("[ROTATE] completed: direction=%s target=%d wheelDeg moved=%d wheelDeg\n",
-                     mDirection > 0 ? "RIGHT" : "LEFT", mTargetTurnWdeg, getTurnWdeg());
+                     mDirection < 0 ? "RIGHT" : "LEFT", mTargetTurnWdeg, getTurnWdeg());
                 return;
             }
             mWalker->setPwm(-mDirection * mPwm, mDirection * mPwm);
