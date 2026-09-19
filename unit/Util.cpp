@@ -1,4 +1,5 @@
 #include "Util.h"
+#include "Log.h"
 
 /*
     文字列を分割する
@@ -55,31 +56,28 @@ std::vector<std::string> split(const std::string& s, const std::string& delimite
 }
 
 eColor getColor(int hue, int saturation, int value) {
+    eColor color = OTHER;
+
     // 暗い領域を優先して黒判定する
     if(value < 32) {
-        return BLACK;
+        color = BLACK;
+    } else if(saturation < 40) {
+        // 彩度が低く一定以上明るい領域を白判定する
+        color = WHITE;
+    } else if(hue <= 20 || hue >= 340) {
+        // 色相ベースの色判定
+        color = RED;
+    } else if(hue >= 40 && hue <= 80) {
+        color = YELLOW;
+    } else if(hue >= 100 && hue <= 160) {
+        color = GREEN;
+    } else if(hue >= 200 && hue <= 280) {
+        color = BLUE;
     }
 
-    // 彩度が低く一定以上明るい領域を白判定する
-    if(saturation < 40 && value >= 32) {
-        return WHITE;
-    }
-
-    // 色相ベースの色判定
-    if(hue <= 20 || hue >= 340) {
-        return RED;
-    }
-    if(hue >= 40 && hue <= 80) {
-        return YELLOW;
-    }
-    if(hue >= 100 && hue <= 160) {
-        return GREEN;
-    }
-    if(hue >= 200 && hue <= 280) {
-        return BLUE;
-    }
-
-    return OTHER;
+    LOGD_EVERY(10, "[COLOR] h=%d s=%d v=%d: %s\n", hue, saturation, value,
+               colorToString(color));
+    return color;
 }
 
 const char* colorToString(eColor color) {

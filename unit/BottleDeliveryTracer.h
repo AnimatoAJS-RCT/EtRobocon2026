@@ -11,6 +11,7 @@
 #include "DistanceTerminator.h"
 #include "Util.h"
 #include "LineTracer.h"
+#include "ScenarioTracer.h"
 
 class BottleDeliveryTracer : public Tracer {
 public:
@@ -43,14 +44,15 @@ private:
 
     enum Stage {
         STAGE_APPROACH_BOTTLE,
-        STAGE_FORWARD_TO_BLACK_BEFORE_COLOR_CHECK,
+        STAGE_TRACE_TO_BOTTLE,
         STAGE_ARM_UP,
         STAGE_COLOR_CHECK,
         STAGE_FORWARD_1CM_FOR_COLOR_RETRY,
         STAGE_BACKWARD_1CM_AFTER_COLOR_CHECK,
         STAGE_ARM_DOWN,
+        STAGE_BLUE_STOP_TRACE,
+        STAGE_PRE_COUNT_TRACE,
         STAGE_BLUE_LINE_COUNT,
-        STAGE_FIRST_BLUE_FORWARD,
         STAGE_BLUE_LINE_HIGH_SPEED,
         STAGE_BLUE_LINE_STRONG_TRACE,
         STAGE_TURN_TO_TARGET,
@@ -72,10 +74,15 @@ private:
     PidGain* mPidGain; // ライン・トレース用PIDゲイン
     PidGain* mRturnPidGain;
     PidGain* mStrongTracePidGain; // 強補正区間用PIDゲイン
+    PidGain* mBlueStopPidGain; // 青停止ライントレース用PIDゲイン
+    PidGain* mPreCountPidGain; // 青線カウント前ライントレース用PIDゲイン
     LineTracer* mLineTracer; // 通常速度のライントレース
     LineTracer* mFastLineTracer; // 高速区間のライントレース
     LineTracer* mStrongTraceLineTracer; // 強補正区間のライントレース
     LineTracer* mReturnLineTracer; // 帰路のライントレース
+    LineTracer* mBlueStopLineTracer; // 青で停止するライントレース
+    LineTracer* mPreCountLineTracer; // 青線カウント前のライントレース
+    ScenarioTracer* mApproachTracer; // ボトル接近用の直進走行
     Stage mStage; // 現在実行中のミッション段階
     bool mStageInitialized; // 現在の段階を初期化済みかどうか
     int mArmStartCount; // アーム動作開始時のエンコーダー値
@@ -90,11 +97,13 @@ private:
     bool mDetectedRedBottle;  
     bool mDetectedYellowBottle; // 
     DetectedColor mDetectedTargetColor; // 現在検出した納品場所の色
+    DistanceTerminator* mApproachDistanceTerminator; // ボトル接近用の距離判定
     DistanceTerminator* mColorRetryDistanceTerminator; // 色判定リトライ用の1cm距離判定
     DistanceTerminator* mColorBackDistanceTerminator; // 色判定後の10mm後退距離判定
-    DistanceTerminator* mFirstBlueForwardTerminator; // 初回青線後の150mm距離判定
-    DistanceTerminator* mBlueLineTraceTerminator; // 1100mmライントレースの距離判定
-    DistanceTerminator* mBlueLineFinalTraceTerminator; // 追加200mmライントレースの距離判定
+    DistanceTerminator* mBlueStopTraceTerminator; // 青で停止するライントレースの距離判定
+    DistanceTerminator* mPreCountTraceTerminator; // 青線カウント前ライントレースの距離判定
+    DistanceTerminator* mFastTraceTerminator; // 高速ライントレースの距離判定
+    DistanceTerminator* mStrongTraceTerminator; // 強補正ライントレースの距離判定
     DistanceTerminator* mDeliveryBackDistanceTerminator; // 納品場所からの後退距離判定
     int mBlueConsecutiveCount; // 青色を連続検出した回数
     eColor mLastDetectedColor; // 前回検出した色

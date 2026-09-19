@@ -99,6 +99,9 @@ static const char* tracerTypeName(const Tracer* tracer)
     if(dynamic_cast<const LineTracer*>(tracer) != nullptr) {
         return "LineTracer";
     }
+    if(dynamic_cast<const BottleDeliveryTracer*>(tracer) != nullptr) {
+        return "BottleDeliveryTracer";
+    }
     if(dynamic_cast<const ArmTracer*>(tracer) != nullptr) {
         return "ArmTracer";
     }
@@ -258,6 +261,32 @@ void generateTracerList()
                 }
             }
             tracerList.push_back(gLineTracer);
+        } else if(spl[0] == "BottleDeliveryTracer") {
+            double targetDistance, p, i, d;
+            int targetBrightness, pwm, maxPwm;
+            bool isLeftEdge;
+
+            targetDistance = atof(spl[1].c_str());
+            targetBrightness = atoi(spl[2].c_str());
+            pwm = atoi(spl[3].c_str());
+            maxPwm = atoi(spl[4].c_str());
+            isLeftEdge = (strcmp(spl[5].c_str(), "LEFT_EDGE") == 0);
+
+            if(IS_LEFT_COURSE) {
+                isLeftEdge = !isLeftEdge;
+            }
+
+            p = atof(spl[6].c_str());
+            i = atof(spl[7].c_str());
+            d = atof(spl[8].c_str());
+            LOGI("BottleDeliveryTracer(%lf, %d, %d, %d, %s, %lf, %lf, %lf): 登録\n",
+                 targetDistance, targetBrightness, pwm, maxPwm,
+                 isLeftEdge ? "LEFT_EDGE" : "RIGHT_EDGE", p, i, d);
+            gBottleDeliveryTracer = new BottleDeliveryTracer(
+                gWalker, gLineMonitor, &gUltrasonicSensor, &gColorSensor, &gArmMotor,
+                targetDistance, targetBrightness, pwm, maxPwm, isLeftEdge, p, i, d);
+            gBottleDeliveryTracer->addStarter(gStarter);
+            tracerList.push_back(gBottleDeliveryTracer);
         } else if(spl[0] == "ArmTracer") {
             if(result_size != 4) {
                 LOGI("ArmTracer requires 3 params: ArmTracer <pwm> <UP|DOWN> <target_angle_deg>\n");

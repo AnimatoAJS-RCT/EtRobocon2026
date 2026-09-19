@@ -40,7 +40,6 @@ void DistanceTerminator::setTargetDistance(double targetDistance)
 bool DistanceTerminator::isToBeTerminate()
 {
     // 前進・後退にかかわらず、初期位置からの移動量で判定する。
-=======
     double currentDistance = std::abs(calcCurrentDistance() - mInitialDistance);
     bool isTerminate = currentDistance >= mTargetDistance;
 
