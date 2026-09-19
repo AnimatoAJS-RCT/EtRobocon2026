@@ -15,6 +15,7 @@
 #include "Tracer.h"
 #include "LineMonitor.h"
 #include "LineTracer.h"
+#include "LineEndApproachTracer.h"
 #include "ArmTracer.h"
 #include "RotateTracer.h"
 #include "ScenarioTracer.h"
@@ -98,6 +99,9 @@ static const char* tracerTypeName(const Tracer* tracer)
     }
     if(dynamic_cast<const LineTracer*>(tracer) != nullptr) {
         return "LineTracer";
+    }
+    if(dynamic_cast<const LineEndApproachTracer*>(tracer) != nullptr) {
+        return "LineEndApproachTracer";
     }
     if(dynamic_cast<const BottleDeliveryTracer*>(tracer) != nullptr) {
         return "BottleDeliveryTracer";
@@ -261,6 +265,15 @@ void generateTracerList()
                 }
             }
             tracerList.push_back(gLineTracer);
+        } else if(spl[0] == "LineEndApproachTracer") {
+            LineEndApproachTracer::Config config;
+            if(!config.parse(spl, IS_LEFT_COURSE)) {
+                LOGE("Invalid LineEndApproachTracer configuration; this step will brake and hold.\n");
+            }
+            auto* lineEndTracer = new LineEndApproachTracer(gWalker, &gColorSensor, config);
+            lineEndTracer->setCalibration(gCalibrator->getBlack(), gCalibrator->getWhite());
+            lineEndTracer->addStarter(gStarter);
+            tracerList.push_back(lineEndTracer);
         } else if(spl[0] == "BottleDeliveryTracer") {
             double targetDistance, p, i, d;
             int targetBrightness, pwm, maxPwm;

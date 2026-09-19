@@ -14,8 +14,8 @@ RotateTracer::RotateTracer(Walker* walker, int direction, int angleDeg, int pwm)
       mStartLeftCount(0),
       mStartRightCount(0)
 {
-    double scale = mDirection > 0 ? RIGHT_TURN_SCALE : LEFT_TURN_SCALE;
-    int offset = mDirection > 0 ? RIGHT_TURN_OFFSET_WDEG : LEFT_TURN_OFFSET_WDEG;
+    double scale = mDirection < 0 ? RIGHT_TURN_SCALE : LEFT_TURN_SCALE;
+    int offset = mDirection < 0 ? RIGHT_TURN_OFFSET_WDEG : LEFT_TURN_OFFSET_WDEG;
     mTargetTurnWdeg = std::max(0, static_cast<int>(mRequestedAngleDeg
                                      * WHEEL_DEG_PER_BODY_DEG * scale)
                           + offset);
@@ -34,7 +34,7 @@ void RotateTracer::run()
                 mStartRightCount = mWalker->getRightCount();
                 mState = WALKING;
                 LOGI("[ROTATE] start: direction=%s requested=%ddeg target=%d wheelDeg pwm=%d\n",
-                     mDirection > 0 ? "RIGHT" : "LEFT", mRequestedAngleDeg,
+                     mDirection < 0 ? "RIGHT" : "LEFT", mRequestedAngleDeg,
                      mTargetTurnWdeg, mPwm);
                 return;
             }
@@ -44,7 +44,7 @@ void RotateTracer::run()
                     mStartRightCount = mWalker->getRightCount();
                     mState = WALKING;
                     LOGI("[ROTATE] start: direction=%s requested=%ddeg target=%d wheelDeg pwm=%d\n",
-                         mDirection > 0 ? "RIGHT" : "LEFT", mRequestedAngleDeg,
+                         mDirection < 0 ? "RIGHT" : "LEFT", mRequestedAngleDeg,
                          mTargetTurnWdeg, mPwm);
                     return;
                 }
@@ -55,7 +55,7 @@ void RotateTracer::run()
                 mWalker->brake();
                 mState = TERMINATED;
                 LOGI("[ROTATE] completed: direction=%s target=%d wheelDeg moved=%d wheelDeg\n",
-                     mDirection > 0 ? "RIGHT" : "LEFT", mTargetTurnWdeg, getTurnWdeg());
+                     mDirection < 0 ? "RIGHT" : "LEFT", mTargetTurnWdeg, getTurnWdeg());
                 return;
             }
             mWalker->setPwm(-mDirection * mPwm, mDirection * mPwm);
