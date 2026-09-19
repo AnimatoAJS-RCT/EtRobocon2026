@@ -11,6 +11,7 @@
 #include "DistanceTerminator.h"
 #include "Util.h"
 #include "LineTracer.h"
+#include "ScenarioTracer.h"
 
 class BottleDeliveryTracer : public Tracer {
 public:
@@ -43,7 +44,7 @@ private:
 
     enum Stage {
         STAGE_APPROACH_BOTTLE,
-        STAGE_FORWARD_TO_BLACK_BEFORE_COLOR_CHECK,
+        STAGE_TRACE_TO_BOTTLE,
         STAGE_ARM_UP,
         STAGE_COLOR_CHECK,
         STAGE_FORWARD_1CM_FOR_COLOR_RETRY,
@@ -76,6 +77,7 @@ private:
     LineTracer* mFastLineTracer; // 高速区間のライントレース
     LineTracer* mStrongTraceLineTracer; // 強補正区間のライントレース
     LineTracer* mReturnLineTracer; // 帰路のライントレース
+    ScenarioTracer* mApproachTracer; // ボトル接近用の直進走行
     Stage mStage; // 現在実行中のミッション段階
     bool mStageInitialized; // 現在の段階を初期化済みかどうか
     int mArmStartCount; // アーム動作開始時のエンコーダー値
@@ -90,6 +92,7 @@ private:
     bool mDetectedRedBottle;  
     bool mDetectedYellowBottle; // 
     DetectedColor mDetectedTargetColor; // 現在検出した納品場所の色
+    DistanceTerminator* mApproachDistanceTerminator; // ボトル接近用の距離判定
     DistanceTerminator* mColorRetryDistanceTerminator; // 色判定リトライ用の1cm距離判定
     DistanceTerminator* mColorBackDistanceTerminator; // 色判定後の10mm後退距離判定
     DistanceTerminator* mFirstBlueForwardTerminator; // 初回青線後の150mm距離判定

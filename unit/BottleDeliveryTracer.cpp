@@ -35,6 +35,7 @@ static const int BLUE_LINE_TOUCH_TARGET_RED = 4;           // 赤ボトル時に
 static const int FIRST_BLUE_FORWARD_DISTANCE_MM = 200;     // 初回青線後に直進する距離(mm)
 static const int BLUE_LINE_TRACE_DISTANCE_MM = 1050;       // ライントレースする距離(mm)
 static const int BLUE_LINE_FINAL_TRACE_DISTANCE_MM = 200;  // 追加でライントレースする距離(mm)
+static const double APPROACH_DISTANCE_MM = 200.0;           // ボトル接近時のライントレース距離(mm)
 static const int FIRST_BLUE_TURN_PWM = 12;          // 初回青線後の旋回量（3度/秒相当の校正値）
 static const double STRONG_TRACE_PID_FACTOR = 2.0;  // 強補正区間のPIDゲイン倍率
 static const int TURN_90_COUNT = 300;               // 90度回転とみなす左右輪の回転差
@@ -69,6 +70,7 @@ BottleDeliveryTracer::BottleDeliveryTracer(Walker* walker, LineMonitor* lineMoni
     mStrongTraceLineTracer(new LineTracer(lineMonitor, walker, targetBrightness, pwm * 0.6, maxPwm,
                                           isLeftEdge, mStrongTracePidGain)),
     mReturnLineTracer(new LineTracer(lineMonitor, walker, 55, 80, 100, isLeftEdge, mRturnPidGain)),
+    mApproachTracer(new ScenarioTracer(walker, pwm, pwm)),
     mStage(STAGE_APPROACH_BOTTLE),
     mStageInitialized(false),
     mArmStartCount(0),
@@ -82,6 +84,7 @@ BottleDeliveryTracer::BottleDeliveryTracer(Walker* walker, LineMonitor* lineMoni
     mDetectedBlueBottle(false),
     mDetectedRedBottle(false),
     mDetectedYellowBottle(false),
+    mApproachDistanceTerminator(new DistanceTerminator(walker, APPROACH_DISTANCE_MM)),
     mColorRetryDistanceTerminator(new DistanceTerminator(walker, COLOR_CHECK_RETRY_DISTANCE_MM)),
     mColorBackDistanceTerminator(new DistanceTerminator(walker, COLOR_CHECK_BACKWARD_DISTANCE_MM)),
     mFirstBlueForwardTerminator(new DistanceTerminator(walker, FIRST_BLUE_FORWARD_DISTANCE_MM)),
@@ -92,6 +95,7 @@ BottleDeliveryTracer::BottleDeliveryTracer(Walker* walker, LineMonitor* lineMoni
     mBlueConsecutiveCount(0),
     mLastDetectedColor(BLACK)
 {
+    mApproachTracer->addTerminator(mApproachDistanceTerminator);
     mState = UNDEFINED;
 }
 
@@ -101,7 +105,9 @@ BottleDeliveryTracer::~BottleDeliveryTracer()
     delete mFastLineTracer;
     delete mStrongTraceLineTracer;
     delete mReturnLineTracer;
+    delete mApproachTracer;
     delete mStrongTracePidGain;
+    delete mApproachDistanceTerminator;
     delete mColorRetryDistanceTerminator;
     delete mColorBackDistanceTerminator;
     delete mFirstBlueForwardTerminator;
@@ -128,27 +134,18 @@ void BottleDeliveryTracer::run()
         case WALKING:
             switch(mStage) {
                 case STAGE_APPROACH_BOTTLE: {
-                    // 行動フロー開始。青色を検出して黒色になるまでの走行へ移る。
-                    LOGI("[BOTTLE] 接近開始: 黒線までライントレース\n");
-                    mStage = STAGE_FORWARD_TO_BLACK_BEFORE_COLOR_CHECK;
+                    LOGI("[BOTTLE] 接近開始: 直進走行\n");
+                    mStage = STAGE_TRACE_TO_BOTTLE;
                     mStageInitialized = false;
                     break;
                 }
-                case STAGE_FORWARD_TO_BLACK_BEFORE_COLOR_CHECK: {
-                    // 黒色を検出するまで進み続ける。
+                case STAGE_TRACE_TO_BOTTLE: {
                     if(!mStageInitialized) {
-                        // この段階に入った最初の周期だけ、青色の連続検出回数をリセットする。
                         mStageInitialized = true;
-                        mBlueConsecutiveCount = 0;
-                        LOGI("[BOTTLE] 前進ライントレースを開始\n");
+                        LOGI("[BOTTLE] 接近直進を開始\n");
                     }
-                    // 通常速度でラインを追従しながら、色センサーで黒色を確認する。
-                    mLineTracer->run();
-                    eColor currentColor = getDetectedColorContinuous();
-                    if(currentColor == BLACK) {
-                        // 黒色に到達したので停止し、ボトル色の確認へ進む。
-                        LOGI("[CAL] シミュレータ: 色判定前に黒を検出\n");
-                        mWalker->stop();
+                    mApproachTracer->run();
+                    if(mApproachTracer->isTerminated()) {
                         mStage = STAGE_ARM_UP;
                         mStageInitialized = false;
                     }
