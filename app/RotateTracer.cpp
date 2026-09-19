@@ -14,8 +14,8 @@ RotateTracer::RotateTracer(Walker* walker, int direction, int angleDeg, int pwm)
       mStartLeftCount(0),
       mStartRightCount(0)
 {
-    double scale = mDirection > 0 ? RIGHT_TURN_SCALE : LEFT_TURN_SCALE;
-    int offset = mDirection > 0 ? RIGHT_TURN_OFFSET_WDEG : LEFT_TURN_OFFSET_WDEG;
+    double scale = mDirection < 0 ? RIGHT_TURN_SCALE : LEFT_TURN_SCALE;
+    int offset = mDirection < 0 ? RIGHT_TURN_OFFSET_WDEG : LEFT_TURN_OFFSET_WDEG;
     mTargetTurnWdeg = std::max(0, static_cast<int>(mRequestedAngleDeg
                                      * WHEEL_DEG_PER_BODY_DEG * scale)
                           + offset);

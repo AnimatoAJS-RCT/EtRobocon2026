@@ -26,10 +26,10 @@ The initial turn and alignment sweeps use `turnPwm` (50 in the example).
 | qrClearMm | 40 | Ignore initial QR/marker detections until this approach distance. |
 | approachMaxMm | 500 | Maximum straight approach distance before failure. |
 | sensorOffsetMm | 45 | Forward distance from wheel axle to floor sensor; advance this far before turning. |
-| traceMaxMm | 700 | Maximum net forward encoder distance after alignment. |
+| traceMaxMm | 700 | Maximum net forward encoder distance after the initial turn. |
 | stableMm | 30 | Required uninterrupted non-white, non-marker tracking before accepting an endpoint. The current scenario uses 100. |
 | gapMm | 20 | Straight travel after first white detection, before accepting the endpoint. |
-| markerMaxMm | 80 | Maximum marker bypass distance, including black-line reacquisition. |
+| markerMaxMm | 80 | Maximum straight distance in each marker-crossing phase. |
 | scanDeg | 20 | Sweep half-angle around the current heading (0 < value <= 45). |
 | endOffsetMm | 0 | Signed final forward offset from the axle position at first white detection. |
 | timeoutTicks | 10000 | Maximum run calls after starting; includes all motion phases. |
@@ -48,22 +48,35 @@ produce a brake-and-hold step, rather than silently skipping into ET Sumo.
 1. Ignore the starting QR for `qrClearMm`. Require a white observation beyond
    that distance before accepting two consecutive black/colored detections.
 2. Advance by `sensorOffsetMm`, turn using the existing RotateTracer calibration,
-   then drive straight 50 mm to leave the colored marker before searching within
-   `scanDeg` for the black line.
+   then inspect the surface without a fixed forward movement. Two consecutive
+   black observations start PID tracking immediately. Two consecutive colored
+   observations start straight marker crossing. White/gray starts a bounded
+   `scanDeg` sweep without forward travel. During a sweep, pause on a candidate
+   to confirm it; black starts tracking, while color starts marker crossing.
 3. Follow the edge using PID. On blue/red/yellow/green, retain the current heading
    with encoder-corrected straight motion until black is reacquired twice.
-   Blue is optional: joining above blue does not require reversing to find it.
+   If white/gray appears instead, stop forward travel and sweep for the line.
+   A marker that continues for `markerMaxMm` fails rather than driving indefinitely.
+   Black below blue and black above blue cannot be distinguished from one color
+   reading: both start tracking. Below blue, a later blue observation switches
+   to marker crossing and resets endpoint stability when black is reacquired.
+   Above blue, tracking continues without reversing to search for blue.
+   Acquisition uses HSV BLACK or a colored marker, not low reflection alone.
+   Low-saturation gray with HSV value >= 32 is not an acquisition candidate;
+   darker gray can still classify as BLACK and needs hardware verification.
 4. At normalized reflection >= 85 without a marker, do not accept an endpoint
    until the line has been tracked continuously for `stableMm`. Before that, keep
-   driving straight so a short crossing line cannot become the endpoint.
+   driving straight and reset the stability distance so a short crossing line
+   cannot become the endpoint, nor can separate short sections accumulate it.
 5. After stable tracking, travel `gapMm` straight; if the line returns, resume
    tracking. Otherwise, move directly back to the first-white position plus
    `endOffsetMm`, brake, and allow the next tracer to start.
 
-Failure latches with `[LINE_END] failed: ...`, brakes on every subsequent run,
-and does **not** report normal termination. The following ET Sumo step cannot
-start. Use the existing left-button stop to exit. Logs also record phase changes;
-numeric phases follow the Phase enum in the header.
+Failure logs `[LINE_END] failed: ...; continue to next tracer`, brakes, and then
+reports termination so the following ET Sumo step can start. This fallback avoids
+indefinite stopped states, but it does not establish the intended starting pose
+for ET Sumo. Logs also record phase changes; numeric phases follow the Phase enum
+in the header.
 
 The approach assumes the starting height intersects the vertical line and that
 `qrClearMm` ends after the QR but before the line. QR and line cannot be identified
@@ -99,6 +112,8 @@ make app=EtRobocon2026
 
 Tests substitute sensor and encoder readings while executing the actual tracer,
 PID, color classifier, and RotateTracer implementation. They cover joining on
-black/blue, endpoint confirmation, temporary loss/reacquisition, failure latching,
-timeouts, mirrored setup, scan overshoot and configuration validation. They do
+black above/below blue and blue itself on both courses, white/gray after turning,
+marker exit to white/gray, marker distance limits, endpoint confirmation,
+temporary loss/reacquisition, failure fallback, timeouts, mirrored setup,
+scan overshoot and configuration validation. They do
 not simulate physical steering, braking or color-sensor accuracy.

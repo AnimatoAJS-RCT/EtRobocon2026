@@ -105,7 +105,32 @@ int main()
     badPwm[2] = "60.5";
     assert(!parsed.parse(badPwm, false));
 
-    for(bool startsOnBlue : {false, true}) {
+    Walker grayWalker;
+    spikeapi::ColorSensor graySensor;
+    Subject grayStart(&grayWalker, &graySensor, config);
+    grayStart.run();
+    grayStart.run();
+    grayWalker.move(50);
+    graySensor.reflection = 100;
+    graySensor.hsv = {200, 20, 100};
+    grayStart.run();
+    graySensor.reflection = 20;
+    graySensor.hsv = {200, 20, 80};
+    grayStart.run();
+    grayStart.run();
+    assert(grayStart.mPhase == Subject::APPROACH);
+    assert(grayStart.mMatchCount == 0);
+
+    graySensor.reflection = 20;
+    graySensor.hsv = {200, 37, 9};
+    grayStart.run();
+    grayStart.run();
+    assert(grayStart.mPhase == Subject::CENTER_ON_LINE);
+
+    for(int scenario = 0; scenario < 6; scenario++) {
+        int startPosition = scenario % 3;
+        config.mirrorCourse = scenario >= 3;
+        bool startsOnBlue = startPosition == 1;
         Walker walker;
         spikeapi::ColorSensor sensor;
         Subject tracer(&walker, &sensor, config);
@@ -131,21 +156,18 @@ int main()
         tracer.run();
         tracer.run();
         tracer.run();
-        assert(walker.leftPwm == -60 && walker.rightPwm == 60);
-        walker.heading(tracer.mTurn.mTargetTurnWdeg);
+         int turnDirection = config.mirrorCourse ? -1 : 1;
+         assert(walker.leftPwm == -60 * turnDirection
+             && walker.rightPwm == 60 * turnDirection);
+         walker.heading(turnDirection * tracer.mTurn.mTargetTurnWdeg);
         tracer.run();
-        assert(tracer.mPhase == Subject::ADVANCE_AFTER_TURN);
+        assert(tracer.mPhase == Subject::CHECK_AFTER_TURN);
         tracer.run();
-        assert(walker.leftPwm == 60 && walker.rightPwm == 60);
-        walker.move(51);
+        assert(walker.leftPwm == 0 && walker.rightPwm == 0);
         tracer.run();
-        assert(tracer.mPhase == Subject::ALIGN_SCAN);
-        sensor.reflection = 0;
-        sensor.hsv = {0, 0, 0};
-        tracer.run();
-        tracer.run();
-        assert(tracer.mPhase == Subject::TRACE);
-        if(startsOnBlue) {
+        assert(tracer.mPhase == (startsOnBlue ? Subject::MARKER : Subject::TRACE));
+        assert(!tracer.mStable);
+        if(startPosition != 0) {
             sensor.reflection = 90;
             sensor.hsv = {220, 100, 100};
             tracer.run();
@@ -156,7 +178,9 @@ int main()
             sensor.reflection = 30;
             sensor.hsv = {0, 0, 0};
             tracer.run();
+            assert(tracer.mPhase == Subject::MARKER);
             tracer.run();
+            assert(tracer.mPhase == Subject::TRACE && !tracer.mStable);
         }
         sensor.reflection = 50;
         sensor.hsv = {0, 0, 0};
@@ -178,6 +202,60 @@ int main()
         assert(tracer.isTerminated());
         assert(walker.leftPwm == 0 && walker.rightPwm == 0);
     }
+    config.mirrorCourse = false;
+
+    for(bool gray : {false, true}) {
+        Walker searchWalker;
+        spikeapi::ColorSensor searchSensor;
+        Subject search(&searchWalker, &searchSensor, config);
+        search.mState = Tracer::WALKING;
+        search.enter(Subject::CHECK_AFTER_TURN);
+        searchSensor.reflection = gray ? 20 : 100;
+        searchSensor.hsv = {200, 20, gray ? 80 : 100};
+        search.run();
+        assert(search.mPhase == Subject::ALIGN_SCAN);
+        assert(searchWalker.leftPwm == 0 && searchWalker.rightPwm == 0);
+        search.run();
+        assert(search.mPhase == Subject::ALIGN_SCAN);
+        assert(searchWalker.leftPwm == -searchWalker.rightPwm);
+
+        searchSensor.reflection = 20;
+        searchSensor.hsv = {200, 37, 9};
+        search.run();
+        assert(search.mPhase == Subject::ALIGN_SCAN);
+        searchSensor.hsv = {220, 100, 100};
+        search.run();
+        assert(search.mPhase == Subject::ALIGN_SCAN);
+        search.run();
+        assert(search.mPhase == Subject::MARKER);
+        search.run();
+        assert(searchWalker.leftPwm == 60 && searchWalker.rightPwm == 60);
+        searchWalker.move(10);
+        searchSensor.reflection = gray ? 20 : 100;
+        searchSensor.hsv = {200, 20, gray ? 80 : 100};
+        search.run();
+        assert(search.mPhase == Subject::ALIGN_SCAN);
+        assert(searchWalker.leftPwm == 0 && searchWalker.rightPwm == 0);
+        searchSensor.reflection = 20;
+        searchSensor.hsv = {200, 37, 9};
+        search.run();
+        search.run();
+        assert(search.mPhase == Subject::TRACE && !search.mStable);
+    }
+
+    Walker markerWalker;
+    spikeapi::ColorSensor markerSensor;
+    Subject markerLimit(&markerWalker, &markerSensor, config);
+    markerLimit.mState = Tracer::WALKING;
+    markerLimit.enter(Subject::CHECK_AFTER_TURN);
+    markerSensor.hsv = {220, 100, 100};
+    markerLimit.run();
+    markerLimit.run();
+    assert(markerLimit.mPhase == Subject::MARKER);
+    markerWalker.move(config.markerMaxMm + 1);
+    markerLimit.run();
+    assert(markerLimit.hasFailed() && markerLimit.isTerminated());
+    assert(markerWalker.leftPwm == 0 && markerWalker.rightPwm == 0);
 
     Walker shortLineWalker;
     spikeapi::ColorSensor shortLineSensor;
@@ -188,6 +266,7 @@ int main()
     shortLine.mTraceStartMm = shortLine.distanceMm();
     shortLine.startTrace(true);
     shortLineSensor.reflection = 30;
+    shortLineSensor.hsv = {200, 37, 9};
     shortLineWalker.move(35);
     shortLine.run();
     assert(!shortLine.mStable);
@@ -196,6 +275,13 @@ int main()
     shortLine.run();
     assert(shortLine.mPhase == Subject::TRACE);
     assert(shortLineWalker.leftPwm == 60 && shortLineWalker.rightPwm == 60);
+    shortLineWalker.move(80);
+    shortLine.run();
+    shortLineSensor.reflection = 30;
+    shortLineSensor.hsv = {200, 37, 9};
+    shortLineWalker.move(35);
+    shortLine.run();
+    assert(!shortLine.mStable);
 
     Walker walker;
     spikeapi::ColorSensor sensor;
@@ -204,7 +290,7 @@ int main()
     missed.run();
     walker.move(501);
     missed.run();
-    assert(missed.hasFailed() && !missed.isTerminated());
+    assert(missed.hasFailed() && missed.isTerminated());
     missed.run();
     assert(walker.leftPwm == 0 && walker.rightPwm == 0);
 
@@ -213,7 +299,7 @@ int main()
     timeout.run();
     timeout.mTicks = config.timeoutTicks;
     timeout.run();
-    assert(timeout.hasFailed());
+    assert(timeout.hasFailed() && timeout.isTerminated());
 
     Subject recovery(&walker, &sensor, config);
     recovery.mState = Tracer::WALKING;
@@ -223,6 +309,7 @@ int main()
     recovery.run();
     assert(recovery.mPhase == Subject::GAP);
     sensor.reflection = 30;
+    sensor.hsv = {200, 37, 9};
     recovery.run();
     recovery.run();
     assert(recovery.mPhase == Subject::TRACE && !recovery.isTerminated());
@@ -233,6 +320,7 @@ int main()
     config.mirrorCourse = false;
     Subject rightCourse(&walker, &sensor, config);
     assert(rightCourse.mTurn.mDirection == 1);
+    assert(rightCourse.mTurn.mTargetTurnWdeg == 161);
 
     walker.heading(0);
     assert(!mirrored.turnTo(20));
@@ -244,6 +332,7 @@ int main()
     assert(mirrored.turnTo(-20));
 
     sensor.reflection = 100;
+    sensor.hsv = {200, 20, 100};
     Subject unstable(&walker, &sensor, config);
     unstable.mState = Tracer::WALKING;
     unstable.mTraceStartMm = unstable.distanceMm();
@@ -252,13 +341,14 @@ int main()
     unstable.run();
     walker.heading(unstable.mScanCenter - config.scanDeg * 14 / 9);
     unstable.run();
-    assert(unstable.hasFailed() && !unstable.isTerminated());
+    assert(unstable.hasFailed() && unstable.isTerminated());
 
     Subject reacquired(&walker, &sensor, config);
     reacquired.mState = Tracer::WALKING;
     reacquired.mTraceStartMm = reacquired.distanceMm();
     reacquired.startScan(Subject::END_SCAN);
     sensor.reflection = 30;
+    sensor.hsv = {200, 37, 9};
     reacquired.run();
     reacquired.run();
     assert(reacquired.mPhase == Subject::TRACE && !reacquired.isTerminated());

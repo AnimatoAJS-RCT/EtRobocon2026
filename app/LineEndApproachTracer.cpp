@@ -136,14 +136,18 @@ void LineEndApproachTracer::enter(Phase phase)
     mPhase = phase;
     mPhaseStartMm = distanceMm();
     mMatchCount = 0;
+    mBlackCount = 0;
+    mMarkerCount = 0;
     mTurnTargetActive = false;
     mWalker->beginEncoderCorrection();
 }
 
 void LineEndApproachTracer::fail(const char* reason)
 {
-    LOGE("[LINE_END] failed: %s\n", reason);
-    enter(FAILED);
+    LOGE("[LINE_END] failed: %s; continue to next tracer\n", reason);
+    mWalker->brake();
+    mPhase = FAILED;
+    mState = TERMINATED;
 }
 
 void LineEndApproachTracer::driveStraight(int direction)
@@ -249,9 +253,15 @@ void LineEndApproachTracer::run()
     mSensor->getHSV(hsv);
     eColor color = getColor(hsv.h, hsv.s, hsv.v);
     bool marker = color == BLUE || color == RED || color == YELLOW || color == GREEN;
-    bool line = normalized <= mConfig.targetBrightness || marker;
+    bool line = color == BLACK || marker;
     bool white = normalized >= 85 && !marker;
+    if(!line && normalized <= mConfig.targetBrightness) {
+        LOGD_EVERY(10, "[LINE_END] ignore non-line: raw=%d normalized=%.1f h=%d s=%d v=%d\n",
+                   reflection, normalized, hsv.h, hsv.s, hsv.v);
+    }
     mMatchCount = line ? mMatchCount + 1 : 0;
+    mBlackCount = color == BLACK ? mBlackCount + 1 : 0;
+    mMarkerCount = marker ? mMarkerCount + 1 : 0;
     double distance = distanceMm();
     double moved = distance - mPhaseStartMm;
 
@@ -289,20 +299,22 @@ void LineEndApproachTracer::run()
     case TURN_TO_LINE:
         mTurn.run();
         if(mTurn.isTerminated()) {
-            enter(ADVANCE_AFTER_TURN);
-        }
-        break;
-    case ADVANCE_AFTER_TURN:
-        if(moved >= POST_TURN_ADVANCE_MM) {
-            startScan(ALIGN_SCAN);
-        } else {
-            driveStraight();
-        }
-        break;
-    case ALIGN_SCAN:
-        if(mMatchCount >= 2) {
             mTraceStartMm = distance;
+            enter(CHECK_AFTER_TURN);
+        }
+        break;
+    case CHECK_AFTER_TURN:
+    case ALIGN_SCAN:
+        if(mBlackCount >= 2) {
+            LOGI("[LINE_END] black acquired: start tracking\n");
             startTrace(true);
+        } else if(mMarkerCount >= 2) {
+            LOGI("[LINE_END] marker acquired: cross until black\n");
+            enter(MARKER);
+        } else if(line) {
+            mWalker->brake();
+        } else if(mPhase == CHECK_AFTER_TURN) {
+            startScan(ALIGN_SCAN);
         } else if(scanFinished()) {
             fail("line not found after turn");
         }
@@ -316,6 +328,7 @@ void LineEndApproachTracer::run()
                 mGapHeading = headingWdeg();
                 enter(GAP);
             } else {
+                mStableStartMm = distance;
                 driveStraight();
             }
         } else {
@@ -328,14 +341,11 @@ void LineEndApproachTracer::run()
     case MARKER:
         if(moved >= mConfig.markerMaxMm) {
             fail("marker distance limit");
-        } else if(!marker && normalized <= mConfig.targetBrightness) {
-            if(mMatchCount >= 2) {
-                startTrace(true);
-            } else {
-                driveStraight();
-            }
+        } else if(mBlackCount >= 2) {
+            startTrace(true);
+        } else if(!line) {
+            startScan(ALIGN_SCAN);
         } else {
-            mMatchCount = 0;
             driveStraight();
         }
         break;

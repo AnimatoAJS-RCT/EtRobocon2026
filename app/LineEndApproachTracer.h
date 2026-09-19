@@ -44,12 +44,10 @@ public:
 
 private:
     enum Phase {
-        APPROACH, CENTER_ON_LINE, TURN_TO_LINE, ADVANCE_AFTER_TURN, ALIGN_SCAN,
+        APPROACH, CENTER_ON_LINE, TURN_TO_LINE, CHECK_AFTER_TURN, ALIGN_SCAN,
         TRACE, MARKER, GAP, END_SCAN, RESTORE_HEADING,
         VERIFY_BACK, POSITION_END, FAILED
     };
-
-    static constexpr double POST_TURN_ADVANCE_MM = 50.0;
 
     Walker* mWalker;
     spikeapi::ColorSensor* mSensor;
@@ -62,6 +60,8 @@ private:
     int mWhite = 100;
     int mTicks = 0;
     int mMatchCount = 0;
+    int mBlackCount = 0;
+    int mMarkerCount = 0;
     bool mSawWhite = false;
     bool mStable = false;
     double mPhaseStartMm = 0;
