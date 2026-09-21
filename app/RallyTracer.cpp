@@ -23,7 +23,8 @@ RallyTracer::RallyTracer(Walker* walker, const RallyRoute& route,
                          bool enableMarkerCorrection,
                          int markerReflectionThreshold,
                          int markerSnapWindowDegrees,
-                         int markerCooldownTicks)
+                         int markerCooldownTicks,
+                         int markerSearchAngleDeg)
     : mWalker(walker),
       mRoute(route),
       mMovePwm(std::max(1, std::abs(movePwm))),
@@ -39,16 +40,24 @@ RallyTracer::RallyTracer(Walker* walker, const RallyRoute& route,
       mPhaseStartRightCount(0),
       mTargetWheelDegrees(0),
             mPreviousTurnError(0),
-    mMoveDirection(1),      mBrakeCountdown(0),      mColorSensor(colorSensor),
+    mMoveDirection(1),      mBrakeCountdown(0),
+    mMarkerCorrectionAllowedThisStep(true),
+    mColorSensor(colorSensor),
       mEnableMarkerCorrection(enableMarkerCorrection),
       mMarkerReflectionThreshold(markerReflectionThreshold),
       mMarkerSnapWindowDegrees(std::max(1, markerSnapWindowDegrees)),
       mMarkerCooldownTicks(std::max(0, markerCooldownTicks)),
       mMarkerCooldownRemaining(0),
+      mMarkerSearchAngleDeg(std::max(1, markerSearchAngleDeg)),
     mMarkerDetectedInPhase(false),
-    mMarkerSearchStage(0),
+    mMarkerSearchRing(0),
+    mMarkerSearchSubStage(MARKER_SEARCH_SWEEP_PLUS),
     mMarkerSearchHeadingDeg(0),
-    mMarkerSearchFirstTurnWheelDegrees(0),
+    mMarkerSearchTurnWheelDegrees(0),
+    mMarkerSearchCrawlOffset(0),
+    mMarkerSearchCrawlStartOffset(0),
+    mMarkerSearchCrawlTargetOffset(0),
+    mMarkerSearchNextRing(0),
     mIsMarkerSearchRecoveryTurning(false)
 {
     mState = UNDEFINED;
@@ -199,9 +208,13 @@ void RallyTracer::beginMoving(int wheelDegrees, int moveDirection)
     mPhase = MOVING;
     mMarkerDetectedInPhase = false;
     mIsMarkerSearchRecoveryTurning = false;
-    LOGD("[RALLY] begin moving: target=%d dir=%d wheel=(%d,%d)\n",
+    // 仮想QR（外周ゲート）への移動中は実 QR がないのでマーカー補正を無効化する
+    mMarkerCorrectionAllowedThisStep = mCurrentStepIndex < mRoute.size()
+        && mRoute[mCurrentStepIndex].type == RouteStepType::MOVE;
+    LOGD("[RALLY] begin moving: target=%d dir=%d wheel=(%d,%d) markerCorrection=%d\n",
          wheelDegrees, mMoveDirection,
-         mWalker->getLeftCount(), mWalker->getRightCount());
+         mWalker->getLeftCount(), mWalker->getRightCount(),
+         mMarkerCorrectionAllowedThisStep ? 1 : 0);
 }
 
 void RallyTracer::beginReturning(int wheelDegrees)
@@ -212,6 +225,8 @@ void RallyTracer::beginReturning(int wheelDegrees)
     mWalker->beginEncoderCorrection();
     mPhase = RETURNING;
     mMarkerDetectedInPhase = false;
+    // 必ず仮想QRからの後退なのでマーカー補正は常に無効
+    mMarkerCorrectionAllowedThisStep = false;
     LOGD("[RALLY] begin returning: wheelDeg=%d\n", wheelDegrees);
 }
 
@@ -226,17 +241,27 @@ void RallyTracer::beginMarkerOffset()
 
 void RallyTracer::beginMarkerSearch()
 {
-    int turnWheelDegrees = static_cast<int>(MARKER_SEARCH_ANGLE_DEGREES
-                                             * WHEEL_DEGREES_PER_BODY_DEGREE * RIGHT_TURN_SCALE);
-    mMarkerSearchStage = 0;
+    mMarkerSearchRing = 0;
     mMarkerSearchHeadingDeg = mHeadingDeg;
-    mMarkerSearchFirstTurnWheelDegrees = turnWheelDegrees;
-    mTargetWheelDegrees = turnWheelDegrees;
+    mMarkerSearchTurnWheelDegrees = static_cast<int>(mMarkerSearchAngleDeg
+                                                      * WHEEL_DEGREES_PER_BODY_DEGREE * RIGHT_TURN_SCALE);
+    mMarkerSearchCrawlOffset = 0;
+    mPhase = MARKER_SEARCH;
+    beginMarkerSearchSweep();
+    LOGI("[RALLY] marker search: heading=%d range=+-%ddeg crawlStep=%d fwdStages=%d backStages=%d\n",
+         mMarkerSearchHeadingDeg, mMarkerSearchAngleDeg,
+         MARKER_SEARCH_CRAWL_STEP_WHEEL_DEGREES,
+         MARKER_SEARCH_MAX_CRAWL_STAGES_FORWARD, MARKER_SEARCH_MAX_CRAWL_STAGES_BACKWARD);
+}
+
+void RallyTracer::beginMarkerSearchSweep()
+{
+    mMarkerSearchSubStage = MARKER_SEARCH_SWEEP_PLUS;
+    mTargetWheelDegrees = mMarkerSearchTurnWheelDegrees;
     resetPhaseCounters();
     mWalker->beginEncoderCorrection();
-    mPhase = MARKER_SEARCH;
-    LOGI("[RALLY] marker search: heading=%d range=+-%ddeg\n",
-         mMarkerSearchHeadingDeg, MARKER_SEARCH_ANGLE_DEGREES);
+    LOGD("[RALLY] marker search: ring=%d sweep at crawlOffset=%d\n",
+         mMarkerSearchRing, mMarkerSearchCrawlOffset);
 }
 
 void RallyTracer::completeMovingStep()
@@ -374,7 +399,7 @@ void RallyTracer::execMoving()
              mWalker->getLeftCount(), mWalker->getRightCount(),
              leftDelta, rightDelta,
              mTargetWheelDegrees - current);
-        if(mEnableMarkerCorrection && mColorSensor != nullptr) {
+        if(mEnableMarkerCorrection && mColorSensor != nullptr && mMarkerCorrectionAllowedThisStep) {
             beginMarkerSearch();
         } else {
             completeMovingStep();
@@ -403,7 +428,8 @@ void RallyTracer::execMarkerOffset()
 {
     int leftDelta  = mWalker->getLeftCount()  - mPhaseStartLeftCount;
     int rightDelta = mWalker->getRightCount() - mPhaseStartRightCount;
-    int current = mMoveDirection * getMoveWheelDegrees();
+    // センサーは常に車軸より +方位側にあるので、後退中(mMoveDirection=-1)でも進行方向は常に +方位側
+    int current = getMoveWheelDegrees();
     if(current >= mTargetWheelDegrees - MOVE_TOLERANCE) {
         mWalker->brake();
         LOGI("[RALLY] marker offset complete: target=%d actual=%d wheel=(%d,%d) delta=(%d,%d) error=%d\n",
@@ -424,52 +450,168 @@ void RallyTracer::execMarkerOffset()
                mTargetWheelDegrees, current, mTargetWheelDegrees - current,
                mWalker->getLeftCount(), mWalker->getRightCount(),
                leftDelta, rightDelta);
-    mWalker->runWithEncoderCorrection(mMoveDirection * mMovePwm,
-                                      mMoveDirection * mMovePwm);
+    mWalker->runWithEncoderCorrection(mMovePwm, mMovePwm);
 }
 
 void RallyTracer::execMarkerSearch()
 {
-    int current = getTurnWheelDegrees();
-    int accumulated = mMarkerSearchStage == 0
-        ? current : mMarkerSearchFirstTurnWheelDegrees + current;
-
     if(isMarkerDetected()) {
-        int bodyDeg = static_cast<int>(accumulated / WHEEL_DEGREES_PER_BODY_DEGREE);
+        int relativeWheelDeg = 0;
+        switch(mMarkerSearchSubStage) {
+            case MARKER_SEARCH_SWEEP_PLUS:
+                // 基準方位(0)から開始するので相対角はそのまま現在値
+                relativeWheelDeg = getTurnWheelDegrees();
+                break;
+            case MARKER_SEARCH_SWEEP_MINUS:
+                // +A から開始して -A へ向かうので +A を起点に加算する
+                relativeWheelDeg = mMarkerSearchTurnWheelDegrees + getTurnWheelDegrees();
+                break;
+            case MARKER_SEARCH_RETURN_HEADING:
+                // -A から開始して基準方位へ戻るので -A を起点に加算する
+                relativeWheelDeg = -mMarkerSearchTurnWheelDegrees + getTurnWheelDegrees();
+                break;
+            case MARKER_SEARCH_CRAWL:
+                relativeWheelDeg = 0;  // クロール中は基準方位のまま
+                break;
+        }
+        int bodyDeg = static_cast<int>(relativeWheelDeg / WHEEL_DEGREES_PER_BODY_DEGREE);
         mHeadingDeg = ((mMarkerSearchHeadingDeg + bodyDeg) % 360 + 360) % 360;
         mIsMarkerSearchRecoveryTurning = true;
         mWalker->brake();
-        LOGI("[RALLY] marker found during search: heading=%d\n", mHeadingDeg);
+        LOGI("[RALLY] marker found during search: ring=%d crawlOffset=%d heading=%d\n",
+             mMarkerSearchRing, mMarkerSearchCrawlOffset, mHeadingDeg);
         beginMarkerOffset();
         return;
     }
 
-    if(std::abs(mTargetWheelDegrees - current) <= TURN_TOLERANCE) {
-        if(mMarkerSearchStage == 0) {
-            mMarkerSearchStage = 1;
-            mTargetWheelDegrees = -2 * mMarkerSearchFirstTurnWheelDegrees;
-            resetPhaseCounters();
-            mWalker->beginEncoderCorrection();
-            LOGD("[RALLY] marker search: sweep opposite direction\n");
-            return;
-        }
+    if(mMarkerSearchSubStage == MARKER_SEARCH_CRAWL) {
+        execMarkerSearchCrawl();
+    } else {
+        execMarkerSearchTurn();
+    }
+}
 
-        mHeadingDeg = ((mMarkerSearchHeadingDeg - MARKER_SEARCH_ANGLE_DEGREES) % 360 + 360) % 360;
-        mIsMarkerSearchRecoveryTurning = true;
-        mWalker->brake();
-        LOGI("[RALLY] marker search: not found\n");
-        beginTurning(mMarkerSearchHeadingDeg);
+void RallyTracer::execMarkerSearchTurn()
+{
+    int current   = getTurnWheelDegrees();
+    int remaining = mTargetWheelDegrees - current;
+
+    if(std::abs(remaining) <= TURN_TOLERANCE) {
+        advanceMarkerSearchStage();
         return;
     }
 
-    if(mTargetWheelDegrees >= 0) {
+    if(remaining > 0) {
         mWalker->setPwm(-mTurnPwm, mTurnPwm);
     } else {
         mWalker->setPwm(mTurnPwm, -mTurnPwm);
     }
-    mWalker->runWithEncoderCorrection(mTargetWheelDegrees >= 0 ? -mTurnPwm : mTurnPwm,
-                                      mTargetWheelDegrees >= 0 ? mTurnPwm : -mTurnPwm);
+    mWalker->runWithEncoderCorrection(remaining > 0 ? -mTurnPwm : mTurnPwm,
+                                      remaining > 0 ? mTurnPwm : -mTurnPwm);
 }
+
+void RallyTracer::execMarkerSearchCrawl()
+{
+    int current   = mMarkerSearchCrawlStartOffset + getMoveWheelDegrees();
+    int remaining = mMarkerSearchCrawlTargetOffset - current;
+
+    if(std::abs(remaining) <= MOVE_TOLERANCE) {
+        mMarkerSearchCrawlOffset = mMarkerSearchCrawlTargetOffset;
+        advanceMarkerSearchStage();
+        return;
+    }
+
+    int crawlPwm = std::min(mMovePwm, APPROACH_PWM);
+    int direction = remaining > 0 ? 1 : -1;
+    mWalker->runWithEncoderCorrection(direction * crawlPwm, direction * crawlPwm);
+}
+
+void RallyTracer::advanceMarkerSearchStage()
+{
+    switch(mMarkerSearchSubStage) {
+        case MARKER_SEARCH_SWEEP_PLUS:
+            mMarkerSearchSubStage = MARKER_SEARCH_SWEEP_MINUS;
+            mTargetWheelDegrees = -2 * mMarkerSearchTurnWheelDegrees;
+            resetPhaseCounters();
+            mWalker->beginEncoderCorrection();
+            LOGD("[RALLY] marker search: ring=%d sweep opposite direction\n", mMarkerSearchRing);
+            return;
+
+        case MARKER_SEARCH_SWEEP_MINUS:
+            mMarkerSearchSubStage = MARKER_SEARCH_RETURN_HEADING;
+            mTargetWheelDegrees = mMarkerSearchTurnWheelDegrees;
+            resetPhaseCounters();
+            mWalker->beginEncoderCorrection();
+            LOGD("[RALLY] marker search: ring=%d return to base heading\n", mMarkerSearchRing);
+            return;
+
+        case MARKER_SEARCH_RETURN_HEADING: {
+            int maxRing = MARKER_SEARCH_MAX_CRAWL_STAGES_FORWARD + MARKER_SEARCH_MAX_CRAWL_STAGES_BACKWARD;
+            int nextRing = mMarkerSearchRing + 1;
+            int targetOffset = (nextRing <= maxRing) ? markerSearchRingOffset(nextRing) : 0;
+
+            if(targetOffset == mMarkerSearchCrawlOffset) {
+                // 既に目標オフセットにいるのでクロール不要
+                if(nextRing <= maxRing) {
+                    mMarkerSearchRing = nextRing;
+                    beginMarkerSearchSweep();
+                } else {
+                    finishMarkerSearchNotFound();
+                }
+                return;
+            }
+
+            mMarkerSearchSubStage = MARKER_SEARCH_CRAWL;
+            mMarkerSearchCrawlStartOffset = mMarkerSearchCrawlOffset;
+            mMarkerSearchCrawlTargetOffset = targetOffset;
+            mMarkerSearchNextRing = nextRing;
+            resetPhaseCounters();
+            mWalker->beginEncoderCorrection();
+            LOGD("[RALLY] marker search: crawl from=%d to=%d (nextRing=%d)\n",
+                 mMarkerSearchCrawlStartOffset, targetOffset, nextRing);
+            return;
+        }
+
+        case MARKER_SEARCH_CRAWL: {
+            int maxRing = MARKER_SEARCH_MAX_CRAWL_STAGES_FORWARD + MARKER_SEARCH_MAX_CRAWL_STAGES_BACKWARD;
+            if(mMarkerSearchNextRing <= maxRing) {
+                mMarkerSearchRing = mMarkerSearchNextRing;
+                beginMarkerSearchSweep();
+            } else {
+                finishMarkerSearchNotFound();
+            }
+            return;
+        }
+    }
+}
+
+void RallyTracer::finishMarkerSearchNotFound()
+{
+    LOGI("[RALLY] marker search: not found after %d ring(s), resuming route\n",
+         MARKER_SEARCH_MAX_CRAWL_STAGES_FORWARD + MARKER_SEARCH_MAX_CRAWL_STAGES_BACKWARD + 1);
+    mWalker->brake();
+    completeMovingStep();
+}
+
+// static
+int RallyTracer::markerSearchRingOffset(int ring)
+{
+    if(ring <= 0) {
+        return 0;
+    }
+    // 前方・後方を交互に1段ずつ広げるが、前方は早めに打ち切り、
+    // 後方（直進中に見逃した側）はより遠くまで探索を続ける
+    int pairCount = 2 * MARKER_SEARCH_MAX_CRAWL_STAGES_FORWARD;
+    if(ring <= pairCount) {
+        int magnitude = (ring + 1) / 2;
+        return (ring % 2 == 1)
+            ? magnitude * MARKER_SEARCH_CRAWL_STEP_WHEEL_DEGREES
+            : -magnitude * MARKER_SEARCH_CRAWL_STEP_WHEEL_DEGREES;
+    }
+    int magnitude = MARKER_SEARCH_MAX_CRAWL_STAGES_FORWARD + (ring - pairCount);
+    return -magnitude * MARKER_SEARCH_CRAWL_STEP_WHEEL_DEGREES;
+}
+
 
 void RallyTracer::execReturning()
 {
@@ -524,7 +666,7 @@ void RallyTracer::resetPhaseCounters()
 
 bool RallyTracer::isMarkerSnapTriggered(int remainingDegrees)
 {
-    if(!mEnableMarkerCorrection || mColorSensor == nullptr) {
+    if(!mEnableMarkerCorrection || mColorSensor == nullptr || !mMarkerCorrectionAllowedThisStep) {
         return false;
     }
     if(remainingDegrees > mMarkerSnapWindowDegrees) {

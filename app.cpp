@@ -425,7 +425,8 @@ void generateTracerList()
                 tracerList.push_back(gUltrasonicAlignTracer);
             }
         } else if(spl[0] == "RallyTracer") {
-            if(result_size != 19 && result_size != 22 && result_size != 23 && result_size != 26) {
+            if(result_size != 19 && result_size != 22 && result_size != 23 && result_size != 24
+               && result_size != 26 && result_size != 27) {
                 LOGI("RallyTracer requires 18 params: <move_pwm> <turn_pwm> <start_x> <start_y> "
                      "<start_heading_deg> <lap_count> "
                      "<red_gx1> <red_gy1> <red_gx2> <red_gy2> "
@@ -433,7 +434,8 @@ void generateTracerList()
                      "<yellow_gx1> <yellow_gy1> <yellow_gx2> <yellow_gy2> "
                      "[<end_x> <end_y> <end_heading_deg>] "
                      "[<marker_enable> <marker_reflection_threshold> "
-                     "<marker_snap_window_deg> <marker_cooldown_ticks>]\n");
+                     "<marker_snap_window_deg> <marker_cooldown_ticks> "
+                     "[<marker_search_angle_deg>]]\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -465,7 +467,9 @@ void generateTracerList()
                                            : startPos;
             int finalHeadingDeg = hasFinalPose ? atoi(spl[21].c_str()) : -1;
             size_t markerIndex = hasFinalPose ? 22 : 19;
-            bool hasMarkerCorrection = result_size == 23 || result_size == 26;
+            bool hasMarkerCorrection = result_size == 23 || result_size == 24
+                || result_size == 26 || result_size == 27;
+            bool hasMarkerSearchAngle = result_size == 24 || result_size == 27;
             bool enableMarkerCorrection = hasMarkerCorrection
                 ? (atoi(spl[markerIndex].c_str()) != 0) : false;
             int markerReflectionThreshold = hasMarkerCorrection
@@ -474,6 +478,8 @@ void generateTracerList()
                 ? atoi(spl[markerIndex + 2].c_str()) : 180;
             int markerCooldownTicks = hasMarkerCorrection
                 ? atoi(spl[markerIndex + 3].c_str()) : 25;
+            int markerSearchAngleDeg = hasMarkerSearchAngle
+                ? atoi(spl[markerIndex + 4].c_str()) : 15;
 
             if(IS_LEFT_COURSE) {
                 auto mirrorQrX = [](int x) { return 5 - x; };
@@ -506,10 +512,11 @@ void generateTracerList()
             RallyRoute route = RallyRouteSolver::solve(gates, cfg);
 
             LOGI("RallyTracer(move=%d turn=%d start=(%d,%d) heading=%d lap=%d "
-                 "end=(%d,%d) endHeading=%d marker=%d thr=%d snap=%d cd=%d): push\n",
+                 "end=(%d,%d) endHeading=%d marker=%d thr=%d snap=%d cd=%d searchAngle=%d): push\n",
                  movePwm, turnPwm, startPos.x, startPos.y, startHeadingDeg, lapCount,
                  finalPos.x, finalPos.y, finalHeadingDeg, enableMarkerCorrection ? 1 : 0,
-                 markerReflectionThreshold, markerSnapWindowDeg, markerCooldownTicks);
+                 markerReflectionThreshold, markerSnapWindowDeg, markerCooldownTicks,
+                 markerSearchAngleDeg);
               LOGI("[RALLY] gates=red((%d,%d)-(%d,%d)) blue((%d,%d)-(%d,%d)) "
                   "yellow((%d,%d)-(%d,%d))\n",
                   gates.red.gx1, gates.red.gy1, gates.red.gx2, gates.red.gy2,
@@ -520,18 +527,23 @@ void generateTracerList()
             gRallyTracer = new RallyTracer(gWalker, route, movePwm, turnPwm, startPos,
                                            startHeadingDeg, finalHeadingDeg, &gColorSensor,
                                            enableMarkerCorrection, markerReflectionThreshold,
-                                           markerSnapWindowDeg, markerCooldownTicks);
+                                           markerSnapWindowDeg, markerCooldownTicks,
+                                           markerSearchAngleDeg);
             gRallyTracer->addStarter(gStarter);
             tracerList.push_back(gRallyTracer);
         } else if(spl[0] == "RallyRouteTracer") {
-            bool hasMarkerCorrection = result_size >= 13 && spl[result_size - 5] == "MARKER";
-            size_t routeConfigEndIndex = hasMarkerCorrection ? result_size - 5 : result_size;
+            bool hasMarkerCorrectionWithAngle = result_size >= 14 && spl[result_size - 6] == "MARKER";
+            bool hasMarkerCorrection = hasMarkerCorrectionWithAngle
+                || (result_size >= 13 && spl[result_size - 5] == "MARKER");
+            size_t routeConfigEndIndex = hasMarkerCorrectionWithAngle ? result_size - 6
+                : hasMarkerCorrection ? result_size - 5 : result_size;
             if(routeConfigEndIndex < 8 ||
                ((routeConfigEndIndex % 2) == 1 && routeConfigEndIndex < 11)) {
                 LOGI("RallyRouteTracer requires: <move_pwm> <turn_pwm> <start_x> <start_y> "
                      "<start_heading_deg> <route_x1> <route_y1> [<route_x2> <route_y2> ...] "
                      "[<end_x> <end_y> <end_heading_deg>] "
-                     "[MARKER <enable> <reflection_threshold> <snap_window_deg> <cooldown_ticks>]\n");
+                     "[MARKER <enable> <reflection_threshold> <snap_window_deg> <cooldown_ticks> "
+                     "[<search_angle_deg>]]\n");
                 if(!std::getline(configStream, line)) {
                     break;
                 }
@@ -548,7 +560,7 @@ void generateTracerList()
                 ? QRPos{atoi(spl[routeEndIndex].c_str()), atoi(spl[routeEndIndex + 1].c_str())}
                 : startPos;
             int finalHeadingDeg = hasFinalPose ? atoi(spl[routeEndIndex + 2].c_str()) : -1;
-            size_t markerIndex = result_size - 4;
+            size_t markerIndex = hasMarkerCorrectionWithAngle ? result_size - 5 : result_size - 4;
             bool enableMarkerCorrection = hasMarkerCorrection
                 ? (atoi(spl[markerIndex].c_str()) != 0) : false;
             int markerReflectionThreshold = hasMarkerCorrection
@@ -557,6 +569,8 @@ void generateTracerList()
                 ? atoi(spl[markerIndex + 2].c_str()) : 180;
             int markerCooldownTicks = hasMarkerCorrection
                 ? atoi(spl[markerIndex + 3].c_str()) : 25;
+            int markerSearchAngleDeg = hasMarkerCorrectionWithAngle
+                ? atoi(spl[markerIndex + 4].c_str()) : 15;
 
             if(IS_LEFT_COURSE) {
                 auto mirrorQrX = [](int x) { return 5 - x; };
@@ -592,17 +606,18 @@ void generateTracerList()
                 route.addStep(RouteStep::move(finalPos));
             }
 
-              LOGI("RallyRouteTracer(move=%d turn=%d start=(%d,%d) heading=%d steps=%u end=(%d,%d) endHeading=%d marker=%d thr=%d snap=%d cd=%d): push\n",
+              LOGI("RallyRouteTracer(move=%d turn=%d start=(%d,%d) heading=%d steps=%u end=(%d,%d) endHeading=%d marker=%d thr=%d snap=%d cd=%d searchAngle=%d): push\n",
                  movePwm, turnPwm, startPos.x, startPos.y, startHeadingDeg,
                   static_cast<unsigned>(route.size()), finalPos.x, finalPos.y, finalHeadingDeg,
                   enableMarkerCorrection ? 1 : 0, markerReflectionThreshold,
-                  markerSnapWindowDeg, markerCooldownTicks);
+                  markerSnapWindowDeg, markerCooldownTicks, markerSearchAngleDeg);
               LOGI("[RALLY] %s", route.toString().c_str());
 
             gRallyTracer = new RallyTracer(gWalker, route, movePwm, turnPwm, startPos,
                                        startHeadingDeg, finalHeadingDeg, &gColorSensor,
                                        enableMarkerCorrection, markerReflectionThreshold,
-                                       markerSnapWindowDeg, markerCooldownTicks);
+                                       markerSnapWindowDeg, markerCooldownTicks,
+                                       markerSearchAngleDeg);
             gRallyTracer->addStarter(gStarter);
             tracerList.push_back(gRallyTracer);
         } else if(spl[0] == "UltrasonicDistanceLoggerTracer") {

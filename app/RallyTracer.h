@@ -33,6 +33,7 @@ public:
       * @param markerReflectionThreshold 黒マーカ判定の反射光しきい値（以下で検出）
       * @param markerSnapWindowDegrees 目標残距離がこの値以下のときだけ補正を許可
       * @param markerCooldownTicks 連続誤検出を防ぐクールダウン周期数
+      * @param markerSearchAngleDeg マーカー未検出時に首振り探索する片側の車体角 [度]
      * @param finalHeadingDeg   終了時の機体向き。負値の場合は最終旋回を行わない
      */
     RallyTracer(Walker* walker, const RallyRoute& route,
@@ -44,7 +45,8 @@ public:
                 bool enableMarkerCorrection = false,
                 int markerReflectionThreshold = 20,
                 int markerSnapWindowDegrees = 180,
-                int markerCooldownTicks = 25);
+                int markerCooldownTicks = 25,
+                int markerSearchAngleDeg = 15);
 
     void run() override;
 
@@ -81,8 +83,21 @@ public:
     /// 前方カメラがマーカーを検出してから車体中心が通過するまでのホイール角 [度]
     static const int MARKER_TO_CENTER_WHEEL_DEGREES = 180;
 
-    /// マーカー未検出時に片側へ探索する車体角 [度]
-    static const int MARKER_SEARCH_ANGLE_DEGREES = 15;
+    /// マーカー未検出時に片側へ探索する車体角のデフォルト値 [度]
+    static const int MARKER_SEARCH_ANGLE_DEGREES_DEFAULT = 15;
+
+    /// マーカー探索で前後にクロールする1段あたりの距離 [ホイール度]
+    /// 前方センサーは車軸中心からタイヤ半径の1.5倍前方にあるため、
+    /// その場旋回だけでは前後方向のずれを拾えない。
+    /// タイヤ径56mm・半径28mmとして、センサーオフセット 1.5×28=42mm を
+    /// ホイール回転角に換算した値（42/(56π)×360 ≈ 86°）を目安に設定。
+    static const int MARKER_SEARCH_CRAWL_STEP_WHEEL_DEGREES = 90;
+
+    /// マーカー探索で前後にクロールする最大段数
+    /// 直進中に見逃したマーカーは目標地点より手前（後方）にある可能性が高いため、
+    /// 後方は前方より広い範囲まで探索する
+    static const int MARKER_SEARCH_MAX_CRAWL_STAGES_FORWARD = 2;
+    static const int MARKER_SEARCH_MAX_CRAWL_STAGES_BACKWARD = 4;
 
 private:
     enum Phase {
@@ -91,7 +106,15 @@ private:
         MOVING,     ///< 目標 QR へ前進中
         RETURNING,  ///< 仮想 QR から実 QR へ後退中 (VIRTUAL_DETOUR 専用)
         MARKER_OFFSET, ///< マーカー検出後、車体中心をマーカー位置まで進める
-        MARKER_SEARCH, ///< マーカー未検出時にカメラを左右へ首振りする
+        MARKER_SEARCH, ///< マーカー未検出時に首振り旋回と前後クロールで探し回る
+    };
+
+    /// マーカー探索中のサブフェーズ
+    enum MarkerSearchSubStage {
+        MARKER_SEARCH_SWEEP_PLUS,     ///< 基準方位から +A 度へ旋回しながら探索
+        MARKER_SEARCH_SWEEP_MINUS,    ///< +A 度から -A 度へ旋回しながら探索
+        MARKER_SEARCH_RETURN_HEADING, ///< -A 度から基準方位へ旋回を戻す
+        MARKER_SEARCH_CRAWL,          ///< 次の探索リングへ前後にクロール移動する
     };
 
     Walker* mWalker;
@@ -113,6 +136,7 @@ private:
     int mPreviousTurnError;         ///< 前回旋回の実績値-目標値 [ホイール度]
     int mMoveDirection;              ///< 走行方向（+1=前進、-1=後退）
     int mBrakeCountdown;             ///< ブレーキフェーズの残りフレーム数
+    bool mMarkerCorrectionAllowedThisStep; ///< 仮想QR（0/5）のゲート通過中はMARKER補正を無効化する
 
     const spikeapi::ColorSensor* mColorSensor;
     bool mEnableMarkerCorrection;
@@ -120,10 +144,16 @@ private:
     int mMarkerSnapWindowDegrees;
     int mMarkerCooldownTicks;
     int mMarkerCooldownRemaining;
+    int mMarkerSearchAngleDeg;                ///< マーカー未検出時に首振り探索する片側の車体角 [度]
     bool mMarkerDetectedInPhase;
-    int mMarkerSearchStage;
-    int mMarkerSearchHeadingDeg;
-    int mMarkerSearchFirstTurnWheelDegrees;
+    int mMarkerSearchRing;                    ///< 探索リング番号 (0=その場旋回のみ、以降前後にクロール)
+    MarkerSearchSubStage mMarkerSearchSubStage;
+    int mMarkerSearchHeadingDeg;               ///< 探索開始時の基準方位 [度]
+    int mMarkerSearchTurnWheelDegrees;         ///< 基準方位から ±A 度旋回するためのホイール度
+    int mMarkerSearchCrawlOffset;               ///< 探索開始位置からの前後クロール量（前進が正）[ホイール度]
+    int mMarkerSearchCrawlStartOffset;          ///< 現在のクロール動作開始時点のオフセット
+    int mMarkerSearchCrawlTargetOffset;         ///< 現在のクロール動作の目標オフセット
+    int mMarkerSearchNextRing;                   ///< クロール完了後に切り替えるリング番号
     bool mIsMarkerSearchRecoveryTurning;
 
     // ---- フェーズ遷移 ----
@@ -143,6 +173,21 @@ private:
     void execReturning();
     void execMarkerOffset();
     void execMarkerSearch();
+
+    // ---- マーカー探索サブフェーズ ----
+    /// 現在のリング位置で ±A 度の首振り旋回を開始する
+    void beginMarkerSearchSweep();
+    /// 旋回サブフェーズ (SWEEP_PLUS/MINUS/RETURN_HEADING) の1ティック分を実行
+    void execMarkerSearchTurn();
+    /// クロールサブフェーズの1ティック分を実行
+    void execMarkerSearchCrawl();
+    /// 現在のサブフェーズ完了後、次のサブフェーズ/リングへ遷移する
+    void advanceMarkerSearchStage();
+    /// 全リングでマーカーが見つからなかった場合の後処理
+    void finishMarkerSearchNotFound();
+    /// 探索リング番号から前後クロールオフセット目標値を返す
+    /// (0, +1段, -1段, +2段, -2段, ... の順)
+    static int markerSearchRingOffset(int ring);
 
     bool isMarkerSnapTriggered(int remainingDegrees);
     bool isMarkerDetected();
